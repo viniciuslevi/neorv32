@@ -15,6 +15,8 @@
 
 int main(void) {
     neorv32_uart0_setup(19200, 0);
+    neorv32_rte_setup(); // instala handlers de debug para excecoes/interrupcoes nao tratadas
+    sdram_install_fault_retry_handler(); // retry automatico em access fault na SDRAM
     neorv32_uart0_printf("\n=== NEORV32 + Acelerador Sistolico - Inferencia MNIST (TCC Fase 3/4) ===\n");
     neorv32_uart0_printf("Modelo: %u camadas, %u bytes de pesos\n", (unsigned)MODEL_NUM_LAYERS, (unsigned)MODEL_WEIGHTS_BYTES);
     neorv32_uart0_printf("SDRAM base: 0x%x\n", (unsigned)SDRAM_BASE);
@@ -33,7 +35,8 @@ int main(void) {
             sdram_ok = 0;
         }
     }
-    neorv32_uart0_printf("[dbg] SDRAM smoke test: %s\n", sdram_ok ? "PASS" : "FAIL");
+    neorv32_uart0_printf("[dbg] SDRAM smoke test: %s (faults retentados: %u)\n",
+                          sdram_ok ? "PASS" : "FAIL", (unsigned)sdram_get_fault_count());
 
     neorv32_uart0_printf("\nAguardando handshake UART (host: tools/send_weights.py)...\n");
     sdram_uart_handshake_loop();

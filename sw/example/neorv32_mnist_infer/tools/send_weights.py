@@ -64,10 +64,8 @@ def send_chunked_with_ack(ser, data: bytes):
         chunk = data[sent:sent + CHUNK_SIZE]
         for attempt in range(MAX_RETRIES_PER_CHUNK):
             ser.write(chunk)
-            resp = ser.read(200)
-            print(f"[debug] offset={sent} attempt={attempt} dots={resp.count(b'.')} "
-                  f"len={len(resp)} resp={resp!r}", file=sys.stderr)
-            if resp[-1:] == b'K':
+            resp = ser.read(1) # firmware responde com exatamente 1 byte: 'K' ou 'N'
+            if resp == b'K':
                 break
             if attempt == MAX_RETRIES_PER_CHUNK - 1:
                 ser.timeout = old_timeout

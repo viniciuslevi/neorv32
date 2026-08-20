@@ -91,7 +91,34 @@ architecture neorv32_de2115_mnist_top_rtl of neorv32_de2115_mnist_top is
 
   signal con_gpio_out : std_ulogic_vector(31 downto 0);
 
+  signal sdram_pll_locked : std_ulogic;
+  signal sdram_rstn       : std_ulogic;
+
 begin
+
+  -- Mantem o controlador SDRAM em reset ate o PLL travar -- sem isso, a FSM
+  -- podia comecar a sequencia de inicializacao do chip com DRAM_CLK ainda
+  -- instavel/nao alternando, corrompendo tudo dali pra frente independente
+  -- da defasagem configurada (foi exatamente o que se observou: mudar a
+  -- fase nao alterava o resultado, sempre 0xFF uniforme).
+  sdram_rstn <= rstn_sync and sdram_pll_locked;
+
+  -- Clock defasado para DRAM_CLK (ALTPLL, gerado via qmegawiz -silent --
+  -- ver sdram_clk_pll_core.vhd/.qip). Substitui o inversor combinacional
+  -- puro (not clk_i) que causava corrupcao de dados em hardware real.
+  sdram_clk_pll_inst: entity work.sdram_clk_pll_core
+  port map (
+    areset => not rstn_sync, -- areset do ALTPLL e ativo-alto
+    inclk0 => clk_i,
+    c0     => open, -- DIAGNOSTICO: PLL instanciado so para o LED de locked,
+                     -- dram_clk_o volta a vir do inversor simples abaixo
+    locked => sdram_pll_locked
+  );
+
+  -- DIAGNOSTICO TEMPORARIO: volta ao inversor simples para isolar se o PLL
+  -- (mesmo travado, LED confirma) e a causa da regressao "tudo 0xff", ou se
+  -- e outra coisa. Ver comentario da instancia do PLL acima.
+  dram_clk_o <= not clk_i;
 
   -- Sincronizador de reset (KEY[0] ativo-baixo, 2 flip-flops) ----------------------
   sync_rst: process(clk_i)
@@ -179,10 +206,15 @@ begin
   );
 
   -- Controlador SDRAM -----------------------------------------------------------------
+  -- Voltou aos defaults da entidade: a combinacao com T_RP=3/RCD=3/RC=6/MRD=4
+  -- travou a placa (pior que o "tudo 0xff" anterior, que ao menos completava)
+  -- -- revertido ate isolar se aquilo era um bug real ou uma gravacao JTAG
+  -- ruim (o adaptador USB do Blaster pode ter o mesmo tipo de instabilidade
+  -- ja visto no CH340 da UART nesta bancada).
   sdram_inst: entity work.neorv32_sdram_controller
   port map (
     clk_i  => clk_i,
-    rstn_i => rstn_sync,
+    rstn_i => sdram_rstn, -- segurado ate o PLL do DRAM_CLK travar
 
     wb_adr_i => sdram_adr,
     wb_dat_i => sdram_dat_o,
@@ -198,7 +230,6 @@ begin
     dram_ba_o    => dram_ba_o,
     dram_cas_n_o => dram_cas_n_o,
     dram_cke_o   => dram_cke_o,
-    dram_clk_o   => dram_clk_o,
     dram_cs_n_o  => dram_cs_n_o,
     dram_dq_io   => dram_dq_io,
     dram_dqm_o   => dram_dqm_o,
@@ -231,6 +262,7 @@ begin
   ledg_o <= con_gpio_out(7 downto 0);
   ledr_o(0) <= rstn_sync;
   ledr_o(1) <= accel_irq;
-  ledr_o(7 downto 2) <= (others => '0');
+  ledr_o(2) <= sdram_pll_locked; -- diagnostico: PLL do DRAM_CLK travou?
+  ledr_o(7 downto 3) <= (others => '0');
 
 end neorv32_de2115_mnist_top_rtl;

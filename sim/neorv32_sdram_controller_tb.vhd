@@ -100,6 +100,12 @@ begin
 
   clk <= not clk after CLK_PERIOD / 2;
 
+  -- dram_clk_o deixou de ser gerado pelo controlador (agora vem de um PLL
+  -- com defasagem controlada no top-level real, ver neorv32_sdram_clk_pll.vhd
+  -- -- a corrupcao de dados vista em hardware nao existe no simulador com
+  -- modelo ideal, entao um inversor simples aqui continua valido pro teste).
+  dram_clk <= not clk;
+
   dut: entity work.neorv32_sdram_controller
     generic map (
       INIT_WAIT_CYCLES   => 50,
@@ -129,7 +135,6 @@ begin
       dram_ba_o    => dram_ba,
       dram_cas_n_o => dram_cas_n,
       dram_cke_o   => dram_cke,
-      dram_clk_o   => dram_clk,
       dram_cs_n_o  => dram_cs_n,
       dram_dq_io   => dram_dq,
       dram_dqm_o   => dram_dqm,

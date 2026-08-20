@@ -30,9 +30,11 @@
 --   Power-up                 >= 100 us antes do primeiro comando (JEDEC)           --
 --   Refresh                  8192 linhas / 64 ms  => 1 refresh a cada ~390 ciclos  --
 -- -------------------------------------------------------------------------------- --
--- DRAM_CLK e gerado como o INVERSO do clock de sistema (defasagem de meio ciclo,   --
--- 10 ns @ 50 MHz), tecnica comum em placas DE2/DE1 para atender ao tempo de setup  --
--- do SDRAM sem precisar de um PLL com deslocamento de fase dedicado.                --
+-- DRAM_CLK NAO e gerado neste arquivo -- ver neorv32_sdram_clk_pll.vhd. A          --
+-- tentativa inicial (inversor combinacional puro, not clk_i) causou corrupcao de   --
+-- dados em hardware real (fase sujeita ao atraso de roteamento generico do FPGA,   --
+-- nao capturada pela simulacao com modelo ideal de SDRAM); substituida por PLL     --
+-- com defasagem controlada.                                                        --
 -- -------------------------------------------------------------------------------- --
 -- Licensed under the BSD-3-Clause license                                          --
 -- ================================================================================ --
@@ -51,6 +53,7 @@ entity neorv32_sdram_controller is
     T_RP_CYCLES        : natural := 1;     -- tRP
     T_RCD_CYCLES        : natural := 1;    -- tRCD
     T_RC_CYCLES         : natural := 3;    -- tRC (usado apos AUTO REFRESH)
+    T_WR_CYCLES         : natural := 2;    -- tWR (write recovery, comando WRITE -> PRECHARGE)
     T_MRD_CYCLES        : natural := 2;    -- tMRD
     CAS_LATENCY         : natural := 2;    -- ciclos entre READ e dado valido
     INIT_REFRESH_COUNT  : natural := 8;    -- auto-refreshes minimos no boot (JEDEC exige >=2)
@@ -72,11 +75,16 @@ entity neorv32_sdram_controller is
     wb_err_o : out std_ulogic;
 
     -- Pinos fisicos do SDRAM (DE2-115)
+    -- NOTA: dram_clk_o NAO e gerado aqui -- ver neorv32_sdram_clk_pll.vhd. Um
+    -- inversor combinacional (not clk_i) alimentando o pino direto causou
+    -- corrupcao de dados em hardware real (fase de clock sujeita ao atraso
+    -- de roteamento generico do FPGA, nao capturada pela simulacao GHDL
+    -- com modelo ideal de SDRAM). Agora vem de um PLL com defasagem
+    -- controlada, instanciado a parte no top-level.
     dram_addr_o  : out std_ulogic_vector(12 downto 0);
     dram_ba_o    : out std_ulogic_vector(1 downto 0);
     dram_cas_n_o : out std_ulogic;
     dram_cke_o   : out std_ulogic;
-    dram_clk_o   : out std_ulogic;
     dram_cs_n_o  : out std_ulogic;
     dram_dq_io   : inout std_logic_vector(31 downto 0);
     dram_dqm_o   : out std_ulogic_vector(3 downto 0);
@@ -108,7 +116,7 @@ architecture neorv32_sdram_controller_rtl of neorv32_sdram_controller is
     S_REFRESH, S_REFRESH_WAIT,
     S_ACTIVE, S_ACTIVE_WAIT,
     S_READ, S_READ_WAIT,
-    S_WRITE, S_WRITE_PULSE,
+    S_WRITE, S_WRITE_PULSE, S_WRITE_RECOVER,
     S_PRECHARGE, S_PRECHARGE_WAIT,
     S_DONE
   );
@@ -145,7 +153,6 @@ begin
   row_sel  <= req_addr(22 downto 10);
   col_sel  <= req_addr(9 downto 0);
 
-  dram_clk_o <= not clk_i;
   dram_cs_n_o  <= cmd_reg(3);
   dram_ras_n_o <= cmd_reg(2);
   dram_cas_n_o <= cmd_reg(1);
@@ -349,7 +356,19 @@ begin
           dram_dqm_o(2) <= not req_sel(2);
           dram_dqm_o(3) <= not req_sel(3);
           wait_cnt <= 0;
-          state <= S_PRECHARGE;
+          state <= S_WRITE_RECOVER;
+
+        when S_WRITE_RECOVER =>
+          -- tWR: confirmado logicamente correto via GHDL (sdram_byte_tb ad-hoc,
+          -- escritas byte-a-byte na mesma palavra preservam os outros lanes).
+          -- A regressao "tudo 0xff" em hardware real persistiu mesmo com isso
+          -- revertido, entao nao era a causa -- mantido ligado.
+          if (wait_cnt < T_WR_CYCLES) then
+            wait_cnt <= wait_cnt + 1;
+          else
+            wait_cnt <= 0;
+            state    <= S_PRECHARGE;
+          end if;
 
         when S_READ =>
           cmd_reg                   <= CMD_READ;

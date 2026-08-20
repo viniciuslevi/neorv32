@@ -7,6 +7,54 @@
 #define BLOB_CHUNK_SIZE  64
 #define BLOB_BYTE_TIMEOUT_MS 200
 
+// A SDRAM as vezes deixa de responder (ack) dentro do XBUS_TIMEOUT em
+// acessos isolados -- confirmado via neorv32_rte_setup(): "Store/Load
+// access fault" real, nao um travamento infinito da FSM. A causa exata
+// ainda nao foi isolada (parece uma condicao de borda rara, possivelmente
+// envolvendo o timer de refresh), mas o efeito e transitorio: a MESMA
+// instrucao, se repetida, normalmente sucede logo em seguida. O handler
+// padrao do RTE avanca MEPC e PULA a instrucao que falhou (perdendo o
+// dado); aqui, em vez disso, forcamos um retry recuando MEPC de volta,
+// com um limite pra nao travar de verdade se a falha for persistente.
+#define SDRAM_FAULT_MAX_CONSECUTIVE_RETRIES 100000
+
+static volatile uint32_t sdram_fault_last_mepc = 0;
+static volatile uint32_t sdram_fault_retry_count = 0;
+static volatile uint32_t sdram_fault_total = 0;
+
+static void sdram_access_fault_retry_handler(void) {
+    uint32_t mepc = neorv32_cpu_csr_read(CSR_MEPC);
+
+    if (mepc == sdram_fault_last_mepc) {
+        sdram_fault_retry_count++;
+    } else {
+        sdram_fault_last_mepc = mepc;
+        sdram_fault_retry_count = 1;
+    }
+    sdram_fault_total++;
+
+    if (sdram_fault_retry_count > SDRAM_FAULT_MAX_CONSECUTIVE_RETRIES) {
+        // falha persistente de verdade (nao transitoria): desiste e deixa o
+        // framework avancar o MEPC normalmente, para nao travar para sempre
+        return;
+    }
+
+    // forca retry: recua MEPC para compensar o +4/+2 que o framework do RTE
+    // aplica automaticamente depois que este handler retornar
+    uint32_t mtinst = neorv32_cpu_csr_read(CSR_MTINST);
+    int compressed = ((mtinst & 3) != 3);
+    neorv32_cpu_csr_write(CSR_MEPC, mepc - (compressed ? 2 : 4));
+}
+
+void sdram_install_fault_retry_handler(void) {
+    neorv32_rte_handler_install(TRAP_CODE_L_ACCESS, sdram_access_fault_retry_handler);
+    neorv32_rte_handler_install(TRAP_CODE_S_ACCESS, sdram_access_fault_retry_handler);
+}
+
+uint32_t sdram_get_fault_count(void) {
+    return sdram_fault_total;
+}
+
 // Le um byte com timeout limitado (-1 se nada chegar a tempo). Alguns
 // adaptadores USB-serial baratos (ex.: CH340) derrubam bytes esporadicamente
 // em transferencias longas -- sem timeout, um byte perdido trava o firmware
@@ -58,18 +106,14 @@ uint32_t sdram_uart_recv_blob(uint32_t sdram_offset) {
         if (want > BLOB_CHUNK_SIZE) {
             want = BLOB_CHUNK_SIZE;
         }
-        neorv32_uart0_putc('S'); // starting this chunk
-
         uint8_t buf[BLOB_CHUNK_SIZE];
         int ok = 1;
         for (uint32_t i = 0; i < want; i++) {
             int c = uart0_getc_timeout(BLOB_BYTE_TIMEOUT_MS);
             if (c < 0) {
-                neorv32_uart0_putc('T'); // this byte timed out
                 ok = 0;
                 break;
             }
-            neorv32_uart0_putc('.'); // this byte arrived ok
             buf[i] = (uint8_t)c;
         }
 

@@ -40,4 +40,12 @@ uint32_t sdram_uart_recv_blob(uint32_t sdram_offset);
 // tile via UART").
 void sdram_uart_handshake_loop(void);
 
+// Instala handlers que fazem retry automatico em Load/Store access fault na
+// SDRAM (ver sdram.c) em vez de deixar o RTE pular a instrucao que falhou.
+// Chamar uma vez, depois de neorv32_rte_setup().
+void sdram_install_fault_retry_handler(void);
+
+// Numero total de access faults retentados desde o boot (para diagnostico).
+uint32_t sdram_get_fault_count(void);
+
 #endif // SDRAM_H
