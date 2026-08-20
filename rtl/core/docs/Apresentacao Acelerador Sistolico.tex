@@ -1,0 +1,960 @@
+\documentclass[aspectratio=169,10pt]{beamer}
+
+% ---------------------------------------------------------------------------
+% Pacotes
+% ---------------------------------------------------------------------------
+\usepackage{fontspec}
+\usepackage[brazil]{babel}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,backgrounds,calc}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{tabularx}
+\usepackage{amsmath}
+
+% ---------------------------------------------------------------------------
+% Tema
+% ---------------------------------------------------------------------------
+\usetheme{Madrid}
+\usecolortheme{default}
+
+\definecolor{accprim}{RGB}{0,72,124}
+\definecolor{accsec}{RGB}{0,140,140}
+\definecolor{accbg}{RGB}{240,244,248}
+\definecolor{accwarn}{RGB}{176,42,42}
+\definecolor{accok}{RGB}{30,110,60}
+
+\setbeamercolor{structure}{fg=accprim}
+\setbeamercolor{palette primary}{bg=accprim,fg=white}
+\setbeamercolor{palette secondary}{bg=accsec,fg=white}
+\setbeamercolor{palette tertiary}{bg=accprim,fg=white}
+\setbeamercolor{title}{fg=white}
+\setbeamercolor{frametitle}{bg=accprim,fg=white}
+\setbeamercolor{block title}{bg=accsec,fg=white}
+\setbeamercolor{block body}{bg=accbg,fg=black}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+\setbeamerfont{footnote}{size=\tiny}
+
+\lstset{
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{accprim}\bfseries,
+  commentstyle=\color{gray}\itshape,
+  stringstyle=\color{accok},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  frame=single,
+  breaklines=true,
+  showstringspaces=false,
+  backgroundcolor=\color{white}
+}
+
+\newcommand{\bitfield}[2]{\texttt{[#1]} #2}
+\newcommand{\regname}[1]{\textbf{\texttt{#1}}}
+
+\title[Acelerador Sistólico 8$\times$8 -- NEORV32]{Acelerador Sistólico 8$\times$8 INT8}
+\subtitle{Registradores, Sinais de Controle e Status\\Integração com o SoC NEORV32 (DE2-115 / Cyclone IV E)}
+\author{Vinícius Levi}
+\date{\today}
+
+\begin{document}
+
+% =============================================================================
+\begin{frame}
+  \titlepage
+\end{frame}
+
+% =============================================================================
+\begin{frame}{Sumário}
+  \tableofcontents
+\end{frame}
+
+% =============================================================================
+\section{Visão Geral}
+% =============================================================================
+
+\begin{frame}{O que é o acelerador}
+  \begin{columns}[T]
+    \begin{column}{0.55\textwidth}
+      \begin{block}{Função}
+        Multiplicador de matrizes \textbf{INT8 $\rightarrow$ INT32} baseado em
+        \emph{array sistólico weight-stationary} $8\times8$, acoplado ao
+        NEORV32 como periférico mapeado em memória.
+      \end{block}
+      \vspace{0.3em}
+      \begin{itemize}
+        \item Opera sobre \textbf{tiles $8\times8$}: um tile de pesos (\emph{stationary})
+          e um tile de ativações.
+        \item Resultado: \texttt{RESULT = ACT @ WEIGHT}, INT32, $8\times8$.
+        \item $\text{RESULT}[r,c] = \sum_{k=0}^{7} \text{ACT}[r,k]\cdot \text{WEIGHT}[k,c]$
+        \item Usado para acelerar camadas de CNN/FC (inferência MNIST) --
+          ver \texttt{sw/example/neorv32\_mnist\_infer}.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \begin{alertblock}{Arquivo RTL efetivamente integrado}
+        \texttt{neorv32\_systolic\_wb\_accelerator.vhd}\\
+        \small (interface Wishbone clássica, substitui o antigo\\
+        \texttt{neorv32\_cfs.vhd})
+      \end{alertblock}
+      \begin{block}{Parâmetros}
+        \begin{tabular}{ll}
+          Linhas / Colunas & $8 \times 8$ \\
+          Dado de entrada & INT8 \\
+          Acumulador & INT32 \\
+          PEs totais & 64 \\
+        \end{tabular}
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Hierarquia de módulos}
+  \centering
+  \begin{tikzpicture}[
+      every node/.style={font=\tiny},
+      box/.style={draw, rounded corners, fill=accbg, minimum height=0.7cm, align=center, text width=3.15cm, inner sep=2pt},
+      top/.style={draw, rounded corners, fill=accsec!30, minimum height=0.7cm, align=center, text width=8.4cm, inner sep=2pt}
+    ]
+    \node[top] (soc) {\textbf{neorv32\_de2115\_mnist\_top.vhd} -- NEORV32 + XBUS $\to$ Gateway Wishbone};
+    \node[box, below=0.35cm of soc, xshift=-2.7cm] (gw) {\textbf{neorv32\_xbus\_wb\_gateway.vhd} -- decodificação de endereço};
+    \node[box, below=0.35cm of gw, xshift=-2.1cm] (sdram) {\texttt{neorv32\_sdram\_\allowbreak controller.vhd} -- SDRAM 128 MB};
+    \node[box, below=0.35cm of gw, xshift=2.1cm, fill=accsec!50] (accel) {\textbf{neorv32\_systolic\_\allowbreak wb\_accelerator.vhd} -- CTRL/STATUS/CONFIG + FSM};
+    \node[box, below=0.35cm of accel, fill=accsec!70] (arr) {\textbf{neorv32\_systolic\_array.vhd} -- malha $8\times8$ de PEs};
+    \node[box, below=0.35cm of arr, fill=accprim!30] (pe) {\textbf{neorv32\_systolic\_pe.vhd} -- 1 PE = MAC INT8$\to$INT32};
+
+    \draw[-Latex] (soc) -- (gw);
+    \draw[-Latex] (gw) -- (sdram);
+    \draw[-Latex] (gw) -- (accel);
+    \draw[-Latex] (accel) -- (arr);
+    \draw[-Latex] (arr) -- (pe);
+  \end{tikzpicture}
+\end{frame}
+
+\begin{frame}{Endereçamento no SoC (barramento XBUS)}
+  \centering
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Faixa de endereço} & \textbf{Tamanho} & \textbf{Destino} \\
+    \midrule
+    \texttt{0x80000000}\,--\,\dots & (reservado) & DMEM interno do NEORV32 \\
+    \texttt{0x90000000}\,--\,\texttt{0x9000FFFF} & 64 KB & \textbf{Acelerador sistólico} \\
+    \texttt{0xA0000000}\,--\,\texttt{0xA7FFFFFF} & 128 MB & SDRAM (pesos/ativações/buffers) \\
+    \bottomrule
+  \end{tabular}
+  \vspace{1em}
+
+  \begin{block}{Gateway XBUS $\to$ Wishbone (\texttt{neorv32\_xbus\_wb\_gateway.vhd})}
+    \begin{itemize}
+      \item Decodifica \texttt{xbus\_adr\_i} e roteia \texttt{stb}/\texttt{cyc} para o escravo correspondente.
+      \item Endereço relativo: \texttt{accel\_adr\_o = xbus\_adr\_i - 0x90000000}.
+      \item Acesso fora das janelas mapeadas gera \texttt{xbus\_err\_o = '1'}.
+    \end{itemize}
+  \end{block}
+\end{frame}
+
+% =============================================================================
+\section{Mapa de Registradores}
+% =============================================================================
+
+\begin{frame}{Mapa de memória do acelerador}
+  \small
+  Base: \texttt{ACCEL\_BASE = 0x90000000}. Endereçamento por \emph{word} de 32 bits.
+  \vspace{0.5em}
+
+  \begin{tabular}{lllp{5.2cm}}
+    \toprule
+    \textbf{Offset} & \textbf{Nome} & \textbf{Acesso} & \textbf{Descrição} \\
+    \midrule
+    \texttt{0x000} & \regname{CTRL}   & R/W & Controle: start, clear, ack IRQ \\
+    \texttt{0x004} & \regname{STATUS} & RO  & busy, done, irq\_pending \\
+    \texttt{0x008} & \regname{CONFIG} & R/W & Reservado (uso futuro) \\
+    \texttt{0x100 -- 0x13C} & \regname{WEIGHT[0..15]} & R/W & Tile de pesos $8\times8$ INT8 (64 B) \\
+    \texttt{0x500 -- 0x53C} & \regname{ACT[0..15]}    & R/W & Tile de ativações $8\times8$ INT8 (64 B) \\
+    \texttt{0x900 -- 0x9FC} & \regname{RESULT[0..63]} & RO  & Resultado $8\times8$ INT32 (256 B) \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{1em}
+  \begin{alertblock}{Nota de implementação}
+    Índices de registrador na RTL usam \texttt{wb\_adr\_i(15 downto 2)}
+    (constantes \texttt{REG\_CTRL}, \texttt{REG\_STATUS}, \texttt{WEIGHT\_BASE\_W},
+    \texttt{ACT\_BASE\_W}, \texttt{RESULT\_BASE\_W} em
+    \texttt{neorv32\_systolic\_wb\_accelerator.vhd:73--78}).
+  \end{alertblock}
+\end{frame}
+
+\begin{frame}{Registrador \regname{CTRL} -- \texttt{0x000} (R/W)}
+  \centering
+  \begin{tikzpicture}[every node/.style={font=\scriptsize}]
+    \draw (0,0) rectangle (8,0.8);
+    \node at (4,0.4) {\texttt{[31:3] reservado}};
+    \draw[fill=accsec!30] (8,0) rectangle (9,0.8);
+    \node at (8.5,0.4) {\textbf{2}};
+    \draw[fill=accsec!30] (9,0) rectangle (10,0.8);
+    \node at (9.5,0.4) {\textbf{1}};
+    \draw[fill=accsec!30] (10,0) rectangle (11,0.8);
+    \node at (10.5,0.4) {\textbf{0}};
+    \node[above] at (0,0.9) {31};
+    \node[above] at (11,0.9) {0};
+    \node[below] at (8.5,-0.1) {\texttt{irq\_clear}};
+    \node[below] at (9.5,-0.1) {\texttt{clear}};
+    \node[below] at (10.5,-0.1) {\texttt{start}};
+  \end{tikzpicture}
+
+  \vspace{0.5em}
+  \small
+  \begin{tabular}{clp{8.5cm}}
+    \toprule
+    \textbf{Bit} & \textbf{Campo} & \textbf{Descrição} \\
+    \midrule
+    \bitfield{0}{start} & \texttt{start} & Pulso para iniciar a computação. FSM só reage se
+      \texttt{array\_busy = 0} e \texttt{array\_clear = 0} (\texttt{start\_req}). \\
+    \bitfield{1}{clear} & \texttt{clear} & Nível: enquanto em \texttt{'1'}, mantém o array sistólico em
+      reset funcional (\texttt{array\_clear}), zerando acumuladores e pesos carregados. \\
+    \bitfield{2}{irq\_clear} & \texttt{ack\_irq} & Escrever \texttt{'1'} limpa a flag \texttt{irq\_pending}
+      e desativa \texttt{irq\_o}. \\
+    \bitfield{31:3}{--} & reservado & Sem efeito; leitura devolve o último valor escrito em \texttt{ctrl\_reg}. \\
+    \bottomrule
+  \end{tabular}
+  \vspace{0.3em}
+  \scriptsize\textit{Observação: \texttt{ctrl\_reg} é um registrador simples (não auto-clear); o firmware
+  tipicamente escreve \texttt{0x1} para start e depois pode escrever \texttt{0x0} ou deixar o bit setado
+  -- o pulso real de início (\texttt{array\_start}) é gerado pela FSM, não pelo bit em si.}
+\end{frame}
+
+\begin{frame}{Registrador \regname{STATUS} -- \texttt{0x004} (somente leitura)}
+  \centering
+  \begin{tikzpicture}[every node/.style={font=\scriptsize}]
+    \draw[fill=accprim!15] (0,0) rectangle (8,0.8);
+    \node at (4,0.4) {\texttt{[31:3] reservado (= 0)}};
+    \draw[fill=accsec!30] (8,0) rectangle (9,0.8);
+    \node at (8.5,0.4) {\textbf{2}};
+    \draw[fill=accsec!30] (9,0) rectangle (10,0.8);
+    \node at (9.5,0.4) {\textbf{1}};
+    \draw[fill=accsec!30] (10,0) rectangle (11,0.8);
+    \node at (10.5,0.4) {\textbf{0}};
+    \node[above] at (0,0.9) {31};
+    \node[above] at (11,0.9) {0};
+    \node[below] at (8.5,-0.1) {\texttt{irq\_pending}};
+    \node[below] at (9.5,-0.1) {\texttt{done}};
+    \node[below] at (10.5,-0.1) {\texttt{busy}};
+  \end{tikzpicture}
+
+  \vspace{0.5em}
+  \small
+  \begin{tabular}{clp{8.5cm}}
+    \toprule
+    \textbf{Bit} & \textbf{Campo} & \textbf{Descrição} \\
+    \midrule
+    \bitfield{0}{busy} & \texttt{busy} & Espelha \texttt{array\_busy}: computação em andamento (carregando,
+      somando, ou aguardando pipeline). \\
+    \bitfield{1}{done} & \texttt{done} & Espelha \texttt{array\_done}: pulso/nível de conclusão do array
+      para a linha de ativação atual. \\
+    \bitfield{2}{irq\_pending} & \texttt{irq\_pending} & \texttt{'1'} após borda de subida de
+      \texttt{array\_done}; permanece até \texttt{CTRL[2]=1}. \\
+    \bitfield{31:3}{--} & reservado & Fixo em \texttt{'0'}. \\
+    \bottomrule
+  \end{tabular}
+
+  \vspace{0.5em}
+  \begin{block}{Uso típico (polling, sem IRQ conectada no top atual)}
+    \small
+    \texttt{while (ACCEL\_STATUS \& 0x01);\ \ // aguarda busy==0}\\
+    \texttt{while (!(ACCEL\_STATUS \& 0x02));\ \ // aguarda done==1}
+  \end{block}
+\end{frame}
+
+\begin{frame}{Registrador \regname{CONFIG} -- \texttt{0x008} (R/W)}
+  \begin{itemize}
+    \item Implementado como registrador \textbf{livre} de 32 bits, sem lógica associada
+      no datapath atual.
+    \item Leitura devolve exatamente o último valor escrito (\emph{loopback}).
+    \item Reservado para extensões futuras: seleção de modo, tamanho de tile
+      variável, escala/quantização programável, etc.
+    \item Contraste: em \texttt{neorv32\_systolic\_top.vhd} (variante alternativa,
+      não integrada ao SoC atual) o \texttt{CONFIG} já reserva os campos
+      \bitfield{31:16}{rows} / \bitfield{15:0}{cols} para operação em tiles.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Janelas de dados: \regname{WEIGHT}, \regname{ACT}, \regname{RESULT}}
+  \small
+  \begin{columns}[T]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{WEIGHT -- \texttt{0x100} (R/W)}
+        \begin{itemize}
+          \item 16 \emph{words} de 32 bits (4 bytes INT8 cada) = 64 B = tile $8\times8$.
+          \item \texttt{wb\_sel\_i} seleciona quais dos 4 bytes da word são escritos
+            (byte-enable).
+          \item Layout \emph{row-major}: \texttt{weight\_mem[row*8+col]}.
+        \end{itemize}
+      \end{block}
+      \begin{block}{ACT -- \texttt{0x500} (R/W)}
+        \begin{itemize}
+          \item Mesmo formato do WEIGHT: 16 words, 64 B, row-major.
+          \item \texttt{act\_mem[row*8+col]}.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \begin{block}{RESULT -- \texttt{0x900} (somente leitura)}
+        \begin{itemize}
+          \item 64 \emph{words} de 32 bits (INT32) = 256 B.
+          \item \texttt{result\_mem[row*8+col] = RESULT[row][col]}.
+          \item Escritas nesta janela são aceitas no barramento (geram \texttt{ack})
+            mas \textbf{não têm efeito}.
+        \end{itemize}
+      \end{block}
+      \begin{alertblock}{Byte-enable na escrita}
+        \begin{lstlisting}[language=VHDL]
+for i in 0 to 3 loop
+  if (wb_sel_i(i) = '1') then
+    weight_mem((addr_idx-WEIGHT_BASE_W)*4+i)
+      <= wb_dat_i((i+1)*8-1 downto i*8);
+  end if;
+end loop;
+        \end{lstlisting}
+      \end{alertblock}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% =============================================================================
+\section{Sinais de Controle e Status Internos}
+% =============================================================================
+
+\begin{frame}{Sinais internos: acelerador $\leftrightarrow$ array sistólico}
+  \small
+  \begin{tabularx}{\linewidth}{lll X}
+    \toprule
+    \textbf{Sinal} & \textbf{Direção} & \textbf{Origem} & \textbf{Descrição} \\
+    \midrule
+    \texttt{array\_start} & accel $\to$ array & FSM (estado \texttt{S\_LOAD\_ACTS}) &
+      Pulso de 1 ciclo; dispara o carregamento de pesos (se ainda não carregados)
+      e o início do cômputo de uma linha. \\
+    \texttt{array\_clear} & accel $\to$ array & \texttt{ctrl\_reg(1)} (combinacional) &
+      Nível; zera acumuladores, registradores de peso e de \emph{skew} enquanto ativo. \\
+    \texttt{array\_busy} & array $\to$ accel & \texttt{busy\_reg} &
+      \texttt{'1'} do início de \texttt{start\_i} até completar \texttt{ARRAY\_ROWS+ARRAY\_COLS-1}
+      ciclos de pipeline. \\
+    \texttt{array\_done} & array $\to$ accel & \texttt{done\_reg} &
+      Pulsa \texttt{'1'} por 1 ciclo quando \texttt{cycle\_cnt} atinge o valor de latência total. \\
+    \bottomrule
+  \end{tabularx}
+
+  \vspace{1em}
+  \begin{tabularx}{\linewidth}{lll X}
+    \toprule
+    \textbf{Barramento} & \textbf{Largura} & \textbf{Sentido} & \textbf{Conteúdo} \\
+    \midrule
+    \texttt{act\_cols\_to\_array} & $8\times8=64$ bits & accel $\to$ array & 1 linha de ativações (8$\times$INT8) \\
+    \texttt{weight\_to\_array}   & $8\times8\times8=512$ bits & accel $\to$ array & tile de pesos completo (64$\times$INT8) \\
+    \texttt{result\_from\_array} & $8\times32=256$ bits & array $\to$ accel & 1 linha de resultado (8$\times$INT32) \\
+    \bottomrule
+  \end{tabularx}
+\end{frame}
+
+\begin{frame}{Detecção de borda e geração de IRQ}
+  \begin{columns}[T]
+    \begin{column}{0.55\textwidth}
+      \begin{block}{Sinais}
+        \begin{itemize}
+          \item \texttt{prev\_done}: registra \texttt{array\_done} do ciclo anterior.
+          \item \texttt{irq\_pending}: seta em borda de subida
+            (\texttt{array\_done='1' and prev\_done='0'}).
+          \item \texttt{irq\_o}: replica \texttt{irq\_pending} (nível, não pulso).
+        \end{itemize}
+      \end{block}
+      \begin{alertblock}{Estado atual da integração}
+        Em \texttt{neorv32\_de2115\_mnist\_top.vhd}, \texttt{accel\_irq} \textbf{não}
+        está conectado a um controlador de interrupção (PLIC/FIRQ) --
+        apenas ao LED \texttt{LEDR[1]}. O firmware da Fase 3/4 usa
+        \emph{polling} de \texttt{STATUS}; a IRQ fica disponível para
+        trabalho futuro.
+      \end{alertblock}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \centering
+      \begin{tikzpicture}[
+          every node/.style={font=\scriptsize},
+          sig/.style={very thick}
+        ]
+          \draw[sig] (0,3) -- (2,3) -- (2,3.4) -- (4,3.4) -- (4,3) -- (6,3);
+          \node[left] at (0,3.2) {\texttt{array\_done}};
+          \draw[sig] (0,2) -- (2.3,2) -- (2.3,2.4) -- (6,2.4);
+          \node[left] at (0,2.2) {\texttt{irq\_pending}};
+          \draw[sig] (0,1) -- (2.3,1) -- (2.3,1.4) -- (6,1.4);
+          \node[left] at (0,1.2) {\texttt{irq\_o}};
+          \draw[dashed,gray] (2,0.8) -- (2,3.6);
+          \node[gray,below] at (2,0.8) {\scriptsize borda};
+          \draw[dashed,gray] (4.6,0.8) -- (4.6,3.6);
+          \node[gray,below] at (4.6,0.8) {\scriptsize \texttt{CTRL[2]=1}};
+          \draw[sig] (4.6,2.4) -- (4.6,2) -- (6,2);
+          \draw[sig] (4.6,1.4) -- (4.6,1) -- (6,1);
+      \end{tikzpicture}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% =============================================================================
+\section{Interface Wishbone}
+% =============================================================================
+
+\begin{frame}{Portas do barramento Wishbone (escravo)}
+  \small
+  \begin{tabularx}{\linewidth}{lccX}
+    \toprule
+    \textbf{Sinal} & \textbf{Largura} & \textbf{Dir.} & \textbf{Função} \\
+    \midrule
+    \texttt{wb\_adr\_i} & 32 & In & Endereço (word-aligned; índice = \texttt{adr(15:2)}) \\
+    \texttt{wb\_dat\_i} & 32 & In & Dados de escrita (CPU $\to$ acelerador) \\
+    \texttt{wb\_dat\_o} & 32 & Out & Dados de leitura (acelerador $\to$ CPU) \\
+    \texttt{wb\_we\_i}  & 1 & In & Write Enable (\texttt{1}=escrita, \texttt{0}=leitura) \\
+    \texttt{wb\_sel\_i} & 4 & In & Byte-select (1 bit por byte da word) \\
+    \texttt{wb\_stb\_i} & 1 & In & Strobe: ciclo válido \\
+    \texttt{wb\_cyc\_i} & 1 & In & Cycle: barramento em uso \\
+    \texttt{wb\_ack\_o} & 1 & Out & Acknowledge: transação concluída (pulso 1 ciclo) \\
+    \texttt{wb\_err\_o} & 1 & Out & Error (não utilizado pelo acelerador; sempre \texttt{'0'}) \\
+    \texttt{irq\_o}     & 1 & Out & Interrupção para o processador (não conectada no top atual) \\
+    \bottomrule
+  \end{tabularx}
+
+  \vspace{1em}
+  \begin{block}{Protocolo}
+    Modo \emph{registered feedback}: mestre mantém \texttt{cyc=stb=1} por 1 ciclo;
+    escravo responde \texttt{ack=1} no ciclo seguinte, junto com o dado
+    (\texttt{wb\_dat\_o}) em caso de leitura.
+  \end{block}
+\end{frame}
+
+\begin{frame}{Protocolo Wishbone clássico -- fundamentos}
+  \begin{itemize}
+    \item \textbf{Síncrono}: todos os sinais são amostrados/gerados em borda de subida
+      de \texttt{clk\_i}; não há lógica assíncrona no barramento.
+    \item \textbf{Single-beat, não pipelined}: cada transação move exatamente 1 word
+      de 32 bits; o próximo ciclo só começa depois que o atual termina
+      (\texttt{ack} ou \texttt{err}). Não há sobreposição de transações.
+    \item \textbf{Sem burst}: o acelerador não decodifica \texttt{cti} (cycle type) --
+      cada pulso de \texttt{cyc\&stb} é tratado como uma transação independente.
+    \item \textbf{Registered feedback}: a resposta (\texttt{ack}/\texttt{dat\_o}) é
+      gerada por um registrador no escravo, nunca combinacionalmente a partir do
+      endereço -- daí o nome: o \emph{feedback} do escravo é sempre registrado,
+      o que impõe no mínimo 1 ciclo de espera (\emph{wait state}) por transação.
+    \item \textbf{Neste acelerador, a latência é fixa}: \texttt{wb\_ack\_o} é
+      sempre \texttt{'1'} no ciclo seguinte a \texttt{cyc\&stb} -- o escravo nunca
+      insere \emph{wait states} extras (todo acesso, incluindo escrita em
+      memória, completa em exatamente 1 ciclo).
+    \item O protocolo, porém, \textbf{suporta} escravos de latência variável: o
+      mestre XBUS do NEORV32 mantém \texttt{cyc} ativo até receber \texttt{ack}
+      ou \texttt{err}, não importa quantos ciclos isso leve (ver próximos slides).
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Temporização: ciclo de escrita}
+  \centering
+  \begin{tikzpicture}[every node/.style={font=\scriptsize}, sig/.style={very thick}]
+    \foreach \x in {0,2,4} { \draw[dashed, gray] (\x,0.3) -- (\x,5.7); }
+    \draw[sig] (-1.6,5) -- (0,5) -- (0,5.4) -- (1,5.4) -- (1,5) -- (2,5) -- (2,5.4) -- (3,5.4) -- (3,5) -- (4,5) -- (4,5.4) -- (5,5.4) -- (5,5) -- (6,5);
+    \node[left] at (-1.6,5.2) {\texttt{clk\_i}};
+    \draw[sig] (-1.6,3.8) -- (0,3.8) -- (0,4.2) -- (2,4.2) -- (2,3.8) -- (6,3.8);
+    \node[left] at (-1.6,4.0) {\texttt{cyc\_i / stb\_i}};
+    \draw[sig, accprim] (-1.6,2.6) -- (0,2.6) -- (0,3.0) -- (2,3.0) -- (2,2.6) -- (6,2.6);
+    \node[left] at (-1.6,2.8) {\texttt{adr,dat\_i,we,sel}};
+    \node at (1,3.25) {\tiny válidos (\texttt{we\_i=1})};
+    \draw[sig, accok] (-1.6,1.4) -- (2,1.4) -- (2,1.8) -- (4,1.8) -- (4,1.4) -- (6,1.4);
+    \node[left] at (-1.6,1.6) {\texttt{ack\_o}};
+    \node[below] at (1,0.2) {ciclo N (pedido)};
+    \node[below] at (3,0.2) {ciclo N+1 (resposta)};
+  \end{tikzpicture}
+\end{frame}
+
+\begin{frame}{Ciclo de escrita -- passo a passo}
+  \begin{itemize}
+    \item Mestre coloca \texttt{adr\_i}, \texttt{dat\_i}, \texttt{we\_i=1} e \texttt{sel\_i}
+      estáveis \textbf{junto} com \texttt{cyc\_i=stb\_i=1}, no ciclo N.
+    \item Na borda de subida ao final do ciclo N, o escravo amostra tudo isso e
+      grava internamente (\texttt{weight\_mem}/\texttt{act\_mem}/\texttt{ctrl\_reg}...).
+    \item \texttt{ack\_o} sobe no ciclo N+1, confirmando a escrita; o mestre então
+      derruba \texttt{cyc\_i/stb\_i}.
+    \item Sem essa confirmação, o mestre (via \texttt{pending} no XBUS) manteria
+      o ciclo aberto indefinidamente -- \texttt{ack} é o que libera o barramento
+      para a próxima transação.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Temporização: ciclo de leitura}
+  \centering
+  \begin{tikzpicture}[every node/.style={font=\scriptsize}, sig/.style={very thick}]
+    \foreach \x in {0,2,4} { \draw[dashed, gray] (\x,0.3) -- (\x,5.7); }
+    \draw[sig] (-1.6,5) -- (0,5) -- (0,5.4) -- (1,5.4) -- (1,5) -- (2,5) -- (2,5.4) -- (3,5.4) -- (3,5) -- (4,5) -- (4,5.4) -- (5,5.4) -- (5,5) -- (6,5);
+    \node[left] at (-1.6,5.2) {\texttt{clk\_i}};
+    \draw[sig] (-1.6,3.8) -- (0,3.8) -- (0,4.2) -- (2,4.2) -- (2,3.8) -- (6,3.8);
+    \node[left] at (-1.6,4.0) {\texttt{cyc\_i / stb\_i}};
+    \draw[sig, accprim] (-1.6,2.6) -- (0,2.6) -- (0,3.0) -- (2,3.0) -- (2,2.6) -- (6,2.6);
+    \node[left] at (-1.6,2.8) {\texttt{adr\_i} (\texttt{we\_i=0})};
+    \draw[sig, accsec] (-1.6,1.4) -- (2,1.4) -- (2,1.8) -- (4,1.8) -- (4,1.4) -- (6,1.4);
+    \node[left] at (-1.6,1.6) {\texttt{dat\_o}};
+    \node at (3,2.05) {\tiny válido};
+    \draw[sig, accok] (-1.6,0.4) -- (2,0.4) -- (2,0.8) -- (4,0.8) -- (4,0.4) -- (6,0.4);
+    \node[left] at (-1.6,0.6) {\texttt{ack\_o}};
+    \node[below] at (1,-0.1) {ciclo N (pedido)};
+    \node[below] at (3,-0.1) {ciclo N+1 (resposta)};
+  \end{tikzpicture}
+\end{frame}
+
+\begin{frame}{Ciclo de leitura -- passo a passo}
+  \begin{itemize}
+    \item Mestre coloca apenas \texttt{adr\_i} e \texttt{we\_i=0} (dado de escrita
+      irrelevante) junto com \texttt{cyc\_i=stb\_i=1} no ciclo N.
+    \item O escravo decodifica \texttt{addr\_idx} e seleciona a fonte
+      (\texttt{ctrl\_reg}, \texttt{status\_reg}, \texttt{result\_mem}, \dots).
+    \item \texttt{dat\_o} e \texttt{ack\_o} tornam-se válidos \textbf{juntos} no
+      ciclo N+1 -- ambos são atribuídos no mesmo processo registrado
+      (\texttt{wb\_slave}), então chegam sincronizados ao mestre.
+    \item Se o mestre precisar encadear outra leitura logo em seguida, o novo
+      \texttt{adr\_i} do ciclo N+1 \textbf{já pode divergir} do endereço que
+      gerou este \texttt{dat\_o} -- por isso o gateway precisa da seleção
+      registrada (\texttt{sel\_*\_r}) ao rotear a resposta (ver próximo slide).
+  \end{itemize}
+\end{frame}
+
+\begin{frame}[fragile]{Sincronização mestre $\to$ gateway $\to$ escravo}
+  \small
+  \begin{columns}[T]
+    \begin{column}{0.52\textwidth}
+      \begin{block}{Mestre XBUS (\texttt{neorv32\_xbus.vhd})}
+        \begin{itemize}
+          \item Registrador \texttt{pending} sobe junto com o 1º \texttt{stb} e
+            mantém \texttt{cyc\_o = stb\_o \textbf{or} pending} ativo até
+            \texttt{ack\_i} ou \texttt{err\_i}.
+          \item Isso permite escravos de \textbf{latência variável} sem que o
+            mestre precise saber quantos ciclos vai levar.
+        \end{itemize}
+      \end{block}
+      \begin{block}{Gateway (\texttt{neorv32\_xbus\_wb\_gateway.vhd})}
+        \begin{itemize}
+          \item Decodifica \texttt{sel\_sdram}/\texttt{sel\_accel} \textbf{combinacionalmente}
+            a partir do endereço atual.
+          \item Mas \textbf{registra} essa escolha em \texttt{sel\_*\_r} no
+            ciclo do pedido -- usada para rotear a resposta 1 ciclo depois.
+        \end{itemize}
+      \end{block}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{lstlisting}[language=VHDL]
+track_sel: process(clk_i)
+begin
+ if rising_edge(clk_i) then
+  if (xbus_cyc_i='1' and
+      xbus_stb_i='1') then
+   sel_sdram_r <= sel_sdram;
+   sel_accel_r <= sel_accel;
+  end if;
+ end if;
+end process;
+
+xbus_dat_o <=
+  sdram_dat_i when sel_sdram_r='1'
+  else accel_dat_i when sel_accel_r='1'
+  else (others=>'0');
+      \end{lstlisting}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Por que registrar a seleção?}
+  \begin{alertblock}{O problema: o endereço pode mudar antes da resposta chegar}
+    A resposta do escravo (\texttt{dat\_i}/\texttt{ack\_i}) só chega \textbf{1 ciclo
+    depois} do pedido. Se o endereço mudar nesse meio-tempo (próxima transação já
+    em andamento), decodificar o endereço \textit{atual} rotearia a resposta
+    \textbf{antiga} para o destino \textbf{errado}.
+  \end{alertblock}
+  \vspace{1em}
+  \begin{block}{A solução: \texttt{sel\_sdram\_r} / \texttt{sel\_accel\_r}}
+    O gateway ``lembra'', em um registrador capturado no próprio ciclo do
+    pedido, qual escravo foi endereçado. Quando a resposta chegar (1 ciclo
+    depois), o mux de saída (\texttt{xbus\_dat\_o}, \texttt{xbus\_ack\_o},
+    \texttt{xbus\_err\_o}) usa essa cópia registrada -- não o endereço atual,
+    que já pode pertencer à transação seguinte.
+  \end{block}
+  \vspace{1em}
+  \small\textit{Esse é o mesmo princípio por trás de qualquer barramento
+  compartilhado com múltiplos escravos e resposta registrada: o roteamento da
+  resposta precisa de memória de \emph{qual pedido está em voo}, não apenas do
+  estado atual do endereço.}
+\end{frame}
+
+\begin{frame}[fragile]{Assimetria de latência: \texttt{ack} vs \texttt{err}}
+  \begin{lstlisting}[language=VHDL]
+xbus_ack_o <= (sdram_ack_i and sel_sdram_r) or (accel_ack_i and sel_accel_r);
+
+xbus_err_o <= (sdram_err_i and sel_sdram_r) or (accel_err_i and sel_accel_r) or
+              (xbus_cyc_i and xbus_stb_i and not sel_sdram and not sel_accel);
+  \end{lstlisting}
+  \vspace{0.5em}
+  \begin{columns}[T]
+    \begin{column}{0.5\textwidth}
+      \begin{block}{\texttt{ack} -- endereço mapeado}
+        Depende de \texttt{sel\_sdram\_r}/\texttt{sel\_accel\_r} (\textbf{registrados}):
+        chega no mínimo 1 ciclo depois do pedido, no ritmo do escravo alvo.
+      \end{block}
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \begin{block}{\texttt{err} -- endereço fora de faixa}
+        O último termo usa \texttt{sel\_sdram}/\texttt{sel\_accel}
+        \textbf{combinacionais} (não registrados): um acesso a região não
+        mapeada gera \texttt{err} no \textbf{mesmo ciclo} do pedido -- 0 wait
+        states, mais rápido que um \texttt{ack} válido.
+      \end{block}
+    \end{column}
+  \end{columns}
+  \vspace{0.5em}
+  \small\textit{Consequência: o barramento reage mais rápido a um endereço
+  inválido do que a um válido -- a CPU (via \texttt{bus\_rsp.err} em
+  \texttt{neorv32\_xbus.vhd}) recebe o erro de barramento sem esperar o
+  \emph{timeout} do XBUS (\texttt{XBUS\_TIMEOUT}).}
+\end{frame}
+
+\begin{frame}{Byte-select e domínio de clock}
+  \begin{block}{\texttt{wb\_sel\_i} (byte-enable) -- assimetria escrita/leitura}
+    \begin{itemize}
+      \item Em \texttt{WEIGHT}/\texttt{ACT}: cada um dos 4 bits de \texttt{sel\_i}
+        habilita a escrita de 1 byte específico (mascaramento real, via \texttt{for}).
+      \item Em \texttt{CTRL}/\texttt{CONFIG}: a word inteira de 32 bits é escrita
+        (\texttt{ctrl\_reg <= wb\_dat\_i}) -- \texttt{sel\_i} é \textbf{ignorado}.
+      \item Em \textbf{qualquer leitura}: a word de 32 bits completa é sempre
+        devolvida; \texttt{sel\_i} não afeta \texttt{wb\_dat\_o}. Cabe ao LSU do
+        NEORV32 aplicar a máscara de byte/half-word do lado do mestre.
+    \end{itemize}
+  \end{block}
+
+  \begin{block}{Um único domínio de clock}
+    \begin{itemize}
+      \item CPU, XBUS, gateway, acelerador, array sistólico e PEs operam todos
+        síncronos ao mesmo \texttt{clk\_i} (50 MHz, direto do oscilador da
+        placa) -- \textbf{não há travessia de domínio de clock (CDC)} no
+        caminho do barramento Wishbone deste projeto.
+      \item O único sincronizador do top-level é para o \textbf{reset externo}
+        (botão físico \texttt{KEY(0)}): 2 flip-flops em cascata
+        (\texttt{sync\_rst} em \texttt{neorv32\_de2115\_mnist\_top.vhd}) --
+        não relacionado ao protocolo Wishbone, apenas garante que
+        \texttt{rstn\_i} chegue livre de metaestabilidade a todos os módulos.
+    \end{itemize}
+  \end{block}
+\end{frame}
+
+% =============================================================================
+\section{Máquina de Estados (FSM)}
+% =============================================================================
+
+\begin{frame}{FSM de computação -- diagrama de estados}
+  \centering
+  \begin{tikzpicture}[
+      every node/.style={font=\scriptsize},
+      st/.style={draw, rounded corners, fill=accbg, minimum width=2.6cm, minimum height=0.9cm, align=center},
+      lbl/.style={font=\tiny, align=center},
+      >=Latex
+    ]
+    \node[st] (idle) {S\_IDLE};
+    \node[st, right=1.9cm of idle] (lw) {S\_LOAD\_WEIGHTS};
+    \node[st, right=1.9cm of lw] (la) {S\_LOAD\_ACTS};
+    \node[st, below=2.3cm of la] (comp) {S\_COMPUTE};
+    \node[st, left=1.9cm of comp] (sr) {S\_STORE\_RESULTS};
+    \node[st, left=1.9cm of sr] (done) {S\_DONE};
+
+    \draw[->] (idle) -- node[lbl, above]{start\_req=1} (lw);
+    \draw[->] (lw) -- node[lbl, above]{sempre} (la);
+    \draw[->] (la) -- node[lbl, right]{array\_start=1} (comp);
+    \draw[->] (comp) -- node[lbl, above]{done=1 \&\\ start=0} (sr);
+    \draw[->] (sr.north) to[out=110,in=250] node[lbl, pos=0.15, left=1pt]{tile\_row$<$7} (la.south);
+    \draw[->] (sr) -- node[lbl, above]{tile\_row=7} (done);
+    \draw[->] (done.north) to[out=110,in=-110] node[lbl, left=2pt]{volta ao idle} (idle.south);
+  \end{tikzpicture}
+
+  \vspace{1em}
+  \small
+  Cada pulso de \texttt{array\_start} computa 1 linha; a FSM percorre
+  \texttt{S\_LOAD\_ACTS} $\to$ \texttt{S\_COMPUTE} $\to$ \texttt{S\_STORE\_RESULTS}
+  8 vezes (1 por \texttt{tile\_row}) antes de alcançar \texttt{S\_DONE}.
+\end{frame}
+
+\begin{frame}{FSM de computação -- ação por estado}
+  \small
+  \begin{tabular}{lp{9.5cm}}
+    \toprule
+    \textbf{Estado} & \textbf{Ação} \\
+    \midrule
+    \texttt{S\_IDLE} & Aguarda \texttt{start\_req = CTRL[0] \& !busy \& !clear}. \\
+    \texttt{S\_LOAD\_WEIGHTS} & Copia \texttt{weight\_mem} $\to$ \texttt{weight\_to\_array} (tile inteiro, 1x por operação). \\
+    \texttt{S\_LOAD\_ACTS} & Copia a linha \texttt{tile\_row} de \texttt{act\_mem} $\to$ \texttt{act\_cols\_to\_array}; pulsa \texttt{array\_start}. \\
+    \texttt{S\_COMPUTE} & Aguarda \texttt{array\_done='1' and array\_start='0'}; ao concluir, grava a linha em \texttt{result\_mem}. \\
+    \texttt{S\_STORE\_RESULTS} & Decide se ainda há linhas (\texttt{tile\_row < 7}) $\to$ volta a \texttt{S\_LOAD\_ACTS}, senão $\to$ \texttt{S\_DONE}. \\
+    \texttt{S\_DONE} & Um ciclo; retorna a \texttt{S\_IDLE}. \\
+    \bottomrule
+  \end{tabular}
+\end{frame}
+
+\begin{frame}[fragile]{Guarda de corrida em \texttt{S\_COMPUTE}}
+  \begin{alertblock}{Bug real corrigido (encontrado via GHDL, \texttt{neorv32\_systolic\_matmul\_tb})}
+    A condição de transição usa \texttt{array\_done='1' \textbf{and} array\_start='0'},
+    não apenas \texttt{array\_done='1'}.
+  \end{alertblock}
+  \begin{itemize}
+    \item No ciclo em que \texttt{array\_start} é pulsado (entrando em
+      \texttt{S\_COMPUTE} vindo de \texttt{S\_LOAD\_ACTS}), o array ainda não
+      processou o pulso -- seu \texttt{done\_reg} só zera no ciclo seguinte.
+    \item Sem a guarda, um \texttt{done\_reg} obsoleto (ainda \texttt{'1'} da
+      linha anterior) faz a FSM concluir precocemente que a linha atual já
+      terminou -- captura o resultado após 1 ciclo em vez dos 15 necessários.
+    \item Só a linha 0 batia por acaso (pipe zerado pelo \texttt{reset} global);
+      linhas seguintes divergiam sistematicamente.
+  \end{itemize}
+\end{frame}
+
+% =============================================================================
+\section{Processing Element (PE) e Array}
+% =============================================================================
+
+\begin{frame}{Sinais do PE -- \texttt{neorv32\_systolic\_pe.vhd}}
+  \begin{columns}[T]
+    \begin{column}{0.5\textwidth}
+      \small
+      \begin{tabularx}{\linewidth}{llX}
+        \toprule
+        \textbf{Porta} & \textbf{Larg.} & \textbf{Descrição} \\
+        \midrule
+        \texttt{en\_i}  & 1 & Habilita acumulação (= \texttt{busy\_reg} do array) \\
+        \texttt{clr\_i} & 1 & Zera \texttt{acc\_reg}, \texttt{a\_reg}, \texttt{w\_reg} \\
+        \texttt{a\_in\_i} & 8 & Ativação de entrada (INT8) \\
+        \texttt{w\_in\_i} & 8 & Peso de entrada (INT8) \\
+        \texttt{p\_in\_i} & 32 & Soma parcial de entrada (do PE acima) \\
+        \texttt{a\_out\_o} & 8 & Ativação propagada (para a direita) \\
+        \texttt{w\_out\_o} & 8 & Peso propagado \\
+        \texttt{p\_out\_o} & 32 & Soma parcial de saída (para o PE abaixo) \\
+        \bottomrule
+      \end{tabularx}
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \begin{block}{Datapath (1 ciclo)}
+        \[
+          \texttt{mult\_res} = \texttt{a\_in\_i} \times \texttt{w\_in\_i}
+        \]
+        \[
+          \texttt{acc\_reg} \leftarrow \texttt{p\_in\_i} + \texttt{mult\_res}
+        \]
+        MAC INT8$\times$INT8$\to$INT32, registrado, sem saturação
+        (\texttt{resize} para 32 bits assume que não há overflow para
+        tiles $8\times8$).
+      \end{block}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Sinais de controle internos do array -- \texttt{neorv32\_systolic\_array.vhd}}
+  \small
+  \begin{tabularx}{\linewidth}{llX}
+    \toprule
+    \textbf{Sinal} & \textbf{Tipo} & \textbf{Papel} \\
+    \midrule
+    \texttt{busy\_reg} & FF & Espelhado em \texttt{busy\_o}; ativo do \texttt{start\_i} até completar a latência de pipeline. \\
+    \texttt{done\_reg} & FF & Espelhado em \texttt{done\_o}; pulsa quando \texttt{cycle\_cnt} atinge \texttt{ARRAY\_ROWS+ARRAY\_COLS-1}. \\
+    \texttt{cycle\_cnt} & contador & Conta ciclos desde \texttt{start\_i}; range $0$..$\texttt{ARRAY\_ROWS+ARRAY\_COLS+1}$. \\
+    \texttt{weight\_loaded} & FF & Gate de \texttt{w\_in\_pe}: PEs só recebem pesos reais após o 1º \texttt{start\_i} (evita lixo de reset). \\
+    \texttt{pe\_weight\_reg} & array $8{\times}8$ de FF & Cópia \emph{stationary} do tile de pesos, carregada uma vez por \texttt{start\_i} com \texttt{busy\_reg=0}. \\
+    \texttt{act\_skew\_regs} & array $8{\times}8$ de FF & Registradores de deslocamento (\emph{skew}): cada linha desliza sua ativação 1 coluna/ciclo. \\
+    \bottomrule
+  \end{tabularx}
+
+  \vspace{1em}
+  \begin{alertblock}{Reset do \emph{skew} por-start (bug corrigido)}
+    \texttt{act\_skew\_regs} zera não só em \texttt{clear\_i}, mas também a
+    cada novo \texttt{start\_i} (\texttt{busy\_reg=0}). Sem isso, valores
+    "em trânsito" de uma linha anterior contaminavam a soma parcial das
+    primeiras colunas da linha seguinte.
+  \end{alertblock}
+\end{frame}
+
+\begin{frame}{Fluxo de dados no array sistólico}
+  \centering
+  \begin{tikzpicture}[
+      every node/.style={font=\tiny},
+      pe/.style={draw, minimum width=0.9cm, minimum height=0.7cm, fill=accbg},
+      scale=1.0
+    ]
+    \foreach \r in {0,...,3} {
+      \foreach \c in {0,...,3} {
+        \node[pe] (pe-\r-\c) at (\c*1.1, -\r*0.9) {PE(\r,\c)};
+      }
+    }
+    \foreach \r in {0,...,3} {
+      \draw[-Latex, accprim] (-0.9,-\r*0.9) -- (pe-\r-0);
+    }
+    \foreach \r in {0,...,3} {
+      \foreach \c [remember=\c as \lastc (initially 0)] in {1,...,3} {
+        \draw[-Latex, accprim] (pe-\r-\lastc) -- (pe-\r-\c);
+      }
+    }
+    \foreach \c in {0,...,3} {
+      \draw[-Latex, accsec] (pe-0-\c.north) -- ++(0,0.5);
+    }
+    \foreach \r [remember=\r as \lastr (initially 0)] in {1,...,3} {
+      \foreach \c in {0,...,3} {
+        \draw[-Latex, accsec] (pe-\lastr-\c) -- (pe-\r-\c);
+      }
+    }
+    \foreach \c in {0,...,3} {
+      \draw[-Latex, accsec] (pe-3-\c) -- ++(0,-0.5) node[below]{result[\c]};
+    }
+    \node[left, accprim, align=center] at (-1.3,0) {\scriptsize ativações\\\scriptsize (skew)};
+    \node[above, accsec] at (0,0.6) {\scriptsize pesos (0) / soma parcial ($\downarrow$)};
+  \end{tikzpicture}
+
+  \vspace{0.5em}
+  \small
+  \begin{itemize}
+    \item \textbf{Ativações}: fluem horizontalmente (esquerda$\to$direita),
+      \emph{skewed} por linha -- 1 elemento por linha entra na coluna 0 a cada ciclo.
+    \item \textbf{Somas parciais}: fluem verticalmente (topo$\to$base), acumuladas por coluna.
+    \item \textbf{Pesos}: tile completo pré-carregado nos PEs (\emph{weight-stationary}), 1 valor
+      independente por PE $(row,col)$ -- não broadcast.
+  \end{itemize}
+\end{frame}
+
+% =============================================================================
+\section{Temporização}
+% =============================================================================
+
+\begin{frame}{Latência e throughput}
+  \begin{block}{Latência de pipeline por linha}
+    \[
+      \text{ciclos} = \text{ARRAY\_ROWS} + \text{ARRAY\_COLS} - 1 = 8 + 8 - 1 = 15 \text{ ciclos}
+    \]
+  \end{block}
+  \begin{itemize}
+    \item Cada pulso de \texttt{start\_i} computa \textbf{1 linha} de ativações
+      contra o tile de pesos (já carregado), levando 15 ciclos até
+      \texttt{done\_o='1'}.
+    \item Uma operação completa de tile $8\times8 @ 8\times8$ dispara
+      \texttt{array\_start} \textbf{8 vezes} (1 por \texttt{tile\_row}),
+      cada uma precedida por \texttt{S\_LOAD\_ACTS} (1 ciclo).
+    \item Latência total aproximada: $8 \times (15 + 1) \approx 128$ ciclos de
+      \texttt{clk\_i} por tile (mais overhead de acesso ao barramento
+      Wishbone para carregar WEIGHT/ACT e ler RESULT).
+    \item Pesos são carregados apenas uma vez (\texttt{S\_LOAD\_WEIGHTS}
+      só ocorre na transição \texttt{S\_IDLE}$\to$\texttt{S\_LOAD\_WEIGHTS}).
+  \end{itemize}
+\end{frame}
+
+% =============================================================================
+\section{Sequência de Operação}
+% =============================================================================
+
+\begin{frame}[fragile]{Sequência completa de uso (firmware)}
+  \small
+  \begin{enumerate}
+    \item \textbf{Reset/clear opcional}: \texttt{CTRL = 0x2}; aguardar \texttt{STATUS.busy=0}.
+    \item \textbf{Carregar pesos}: 16 escritas em \texttt{WEIGHT[0..15]} (64 B, tile $8\times8$ INT8).
+    \item \textbf{Carregar ativações}: 16 escritas em \texttt{ACT[0..15]} (64 B).
+    \item \textbf{Disparar}: \texttt{CTRL = 0x1} (bit \texttt{start}).
+    \item \textbf{Aguardar conclusão}: \emph{polling} em \texttt{STATUS.done}
+      (bit 1) ou \texttt{STATUS.busy} (bit 0) voltando a 0.
+    \item \textbf{Ler resultado}: 64 leituras em \texttt{RESULT[0..63]} (INT32, row-major).
+    \item \textit{(Opcional)} \textbf{Limpar IRQ}: \texttt{CTRL = 0x4} se \texttt{irq\_pending} foi usado.
+  \end{enumerate}
+
+  \vspace{0.5em}
+  \begin{lstlisting}[language=C]
+ACCEL_CTRL = 0x00000002;          // clear
+while (ACCEL_STATUS & 0x01);      // aguarda busy==0
+for (i=0;i<16;i++) ACCEL_WEIGHT(i) = w[i];
+for (i=0;i<16;i++) ACCEL_ACT(i)    = a[i];
+ACCEL_CTRL = 0x00000001;          // start
+while (!(ACCEL_STATUS & 0x02));   // aguarda done==1
+for (i=0;i<64;i++) result[i] = ACCEL_RESULT(i);
+  \end{lstlisting}
+\end{frame}
+
+\begin{frame}{Driver de software -- \texttt{accel\_driver.c/.h}}
+  \begin{itemize}
+    \item \texttt{ACCEL\_BASE = 0x90000000u}
+    \item API de alto nível: \texttt{accel\_matmul\_i8(A, M, K, W, N, zp\_a, C)}
+    \item Multiplica $A_{M\times K} \times W_{K\times N}$ (INT8) $\to$ $C_{M\times N}$ (INT32, RAW).
+    \item Aplica \emph{zero-point} de entrada (\texttt{zp\_a}) -- quantização assimétrica
+      estilo TFLite; peso assumido com zero-point 0.
+    \item Faz \emph{tiling} automático: $M$, $K$, $N$ não precisam ser múltiplos de 8
+      -- bordas preenchidas com zero.
+    \item Bias e requantização ficam a cargo da camada acima (\texttt{inference.c}).
+  \end{itemize}
+\end{frame}
+
+% =============================================================================
+\section{Referência Consolidada}
+% =============================================================================
+
+\begin{frame}{Tabela-resumo: todos os registradores}
+  \tiny
+  \begin{tabularx}{\linewidth}{lllX}
+    \toprule
+    \textbf{Offset} & \textbf{Reg.} & \textbf{Bits} & \textbf{Significado} \\
+    \midrule
+    \texttt{0x000} & CTRL   & [0] & \texttt{start} -- pulso de início \\
+                    &        & [1] & \texttt{clear} -- reset funcional do array (nível) \\
+                    &        & [2] & \texttt{irq\_clear} -- confirma/limpa IRQ \\
+                    &        & [31:3] & reservado \\
+    \texttt{0x004} & STATUS & [0] & \texttt{busy} -- computação em andamento \\
+                    &        & [1] & \texttt{done} -- linha concluída \\
+                    &        & [2] & \texttt{irq\_pending} -- IRQ pendente \\
+                    &        & [31:3] & reservado (sempre 0) \\
+    \texttt{0x008} & CONFIG & [31:0] & livre / reservado (uso futuro) \\
+    \texttt{0x100--0x13C} & WEIGHT[0..15] & [31:0]$\times$16 & tile de pesos $8\times8$ INT8 \\
+    \texttt{0x500--0x53C} & ACT[0..15]    & [31:0]$\times$16 & tile de ativações $8\times8$ INT8 \\
+    \texttt{0x900--0x9FC} & RESULT[0..63] & [31:0]$\times$64 & resultado $8\times8$ INT32 \\
+    \bottomrule
+  \end{tabularx}
+
+  \vspace{1em}
+  \tiny
+  \begin{tabularx}{\linewidth}{llX}
+    \toprule
+    \textbf{Sinal interno} & \textbf{Módulo} & \textbf{Papel} \\
+    \midrule
+    \texttt{array\_start / array\_clear} & wb\_accelerator $\to$ array & controle do array \\
+    \texttt{array\_busy / array\_done}   & array $\to$ wb\_accelerator & status do array \\
+    \texttt{irq\_pending / irq\_o}       & wb\_accelerator & IRQ nível, latch por borda de \texttt{done} \\
+    \texttt{fsm\_state / tile\_row}      & wb\_accelerator & FSM de orquestração (6 estados) \\
+    \texttt{busy\_reg / done\_reg / cycle\_cnt} & array & controle de pipeline (15 ciclos) \\
+    \texttt{weight\_loaded / pe\_weight\_reg} & array & tile de pesos \emph{stationary} \\
+    \texttt{act\_skew\_regs}             & array & deslocamento (skew) das ativações \\
+    \texttt{acc\_reg / mult\_res}        & PE & MAC INT8$\to$INT32 \\
+    \bottomrule
+  \end{tabularx}
+\end{frame}
+
+\begin{frame}{Referências e arquivos-fonte}
+  \small
+  \begin{itemize}
+    \item \texttt{rtl/core/neorv32\_systolic\_wb\_accelerator.vhd} -- registradores,
+      FSM, interface Wishbone \textbf{(módulo integrado ao SoC atual)}
+    \item \texttt{rtl/core/neorv32\_systolic\_array.vhd} -- malha $8\times8$, skew, pipeline
+    \item \texttt{rtl/core/neorv32\_systolic\_pe.vhd} -- elemento de processamento (MAC)
+    \item \texttt{rtl/core/neorv32\_xbus\_wb\_gateway.vhd} -- decodificação de endereço XBUS
+    \item \texttt{rtl/core/neorv32\_de2115\_mnist\_top.vhd} -- topo do SoC (DE2-115)
+    \item \texttt{sw/example/neorv32\_mnist\_infer/accel\_driver.[ch]} -- driver de software
+    \item \texttt{sw/example/test\_systolic\_accel/main.c} -- teste unitário de registradores
+    \item \texttt{sim/neorv32\_systolic\_matmul\_tb.vhd} -- testbench GHDL (encontrou os 2 bugs de corrida citados)
+    \item \texttt{docs/Systolic Array Guide.md} -- guia estendido em Markdown
+  \end{itemize}
+\end{frame}
+
+\begin{frame}
+  \centering
+  \Huge Obrigado!
+  \vspace{1em}
+
+  \normalsize Dúvidas?
+\end{frame}
+
+\end{document}

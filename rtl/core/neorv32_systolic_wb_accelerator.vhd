@@ -1,0 +1,364 @@
+  -- ================================================================================ --
+  -- NEORV32 SoC - Systolic Array Accelerator (Wishbone Interface)                     --
+  -- -------------------------------------------------------------------------------- --
+  -- Versao do acelerador sistolico com interface Wishbone classica (non-pipelined)    --
+  -- Substitui o modulo neorv32_cfs para integrar o array sistolico via barramento WB  --
+  -- -------------------------------------------------------------------------------- --
+  -- Mapa de memoria (enderecos em bytes, relativos ao BASE do periferico):            --
+  --   0x000  CTRL        [2] irq_clear, [1] clear, [0] start                         --
+  --   0x004  STATUS      [2] irq_pending, [1] done, [0] busy                         --
+  --   0x008  CONFIG      Reservado (leitura/escrita livre, uso futuro)                --
+  --   0x100  WEIGHT[0..15]  Tile de pesos 8x8 INT8 (64 B, 4 bytes/word, row-major)    --
+  --   0x500  ACT[0..15]     Tile de ativacoes 8x8 INT8 (64 B, 4 bytes/word)           --
+  --   0x900  RESULT[0..63]  Resultado 8x8 INT32 (256 B, somente leitura, row-major)   --
+  -- -------------------------------------------------------------------------------- --
+  -- Semantica de calculo: um pulso de start multiplica o tile de ativacoes 8x8 pelo   --
+  -- tile de pesos 8x8 (stationary), produzindo RESULT = ACT @ WEIGHT (INT32, 8x8).    --
+  -- RESULT[r*8+c] = sum_k ACT[r*8+k] * WEIGHT[k*8+c]. Ver neorv32_systolic_array.vhd. --
+  -- -------------------------------------------------------------------------------- --
+  -- Licensed under the BSD-3-Clause license                                           --
+  -- ================================================================================ --
+
+  library ieee;
+  use ieee.std_logic_1164.all;
+  use ieee.numeric_std.all;
+
+  library neorv32;
+  use neorv32.neorv32_package.all;
+
+  -- Entidade: interface Wishbone classica do acelerador sistolico
+  entity neorv32_systolic_wb_accelerator is
+    port (
+      -- Clock e reset (ativo-baixo, convencao NEORV32)
+      clk_i   : in  std_ulogic;                        -- Clock global do sistema
+      rstn_i  : in  std_ulogic;                        -- Reset sincrono ativo-baixo
+
+      -- Interrupcao
+      irq_o   : out std_ulogic;                        -- Sinal de IRQ para o processador
+
+      -- Sinais do barramento Wishbone (escravo)
+      wb_adr_i : in  std_ulogic_vector(31 downto 0);   -- Endereco (word-aligned)
+      wb_dat_i : in  std_ulogic_vector(31 downto 0);   -- Dados de escrita (CPU -> acelerador)
+      wb_dat_o : out std_ulogic_vector(31 downto 0);   -- Dados de leitura (acelerador -> CPU)
+      wb_we_i  : in  std_ulogic;                        -- Write Enable: '1' = escrita, '0' = leitura
+      wb_sel_i : in  std_ulogic_vector(3 downto 0);    -- Byte select (1 byte por bit)
+      wb_stb_i : in  std_ulogic;                        -- Strobe: indica ciclo valido
+      wb_cyc_i : in  std_ulogic;                        -- Cycle: indica barramento em uso
+      wb_ack_o : out std_ulogic;                        -- Acknowledge: transacao concluida
+      wb_err_o : out std_ulogic                         -- Error: erro na transacao
+    );
+  end neorv32_systolic_wb_accelerator;
+
+  -- Arquitetura: logica RTL do acelerador com interface Wishbone
+  architecture neorv32_systolic_wb_rtl of neorv32_systolic_wb_accelerator is
+
+    -- Dimensoes do array sistolico
+    constant ARRAY_ROWS : natural := 8;   -- Numero de linhas do array (8 PEs por coluna)
+    constant ARRAY_COLS : natural := 8;   -- Numero de colunas do array (8 PEs por linha)
+    constant DATA_WIDTH : natural := 8;   -- Largura dos dados de entrada (INT8)
+    constant ACC_WIDTH  : natural := 32;  -- Largura do acumulador (INT32)
+
+    -- Total de entradas em cada memoria
+    constant WEIGHT_ENTRIES : natural := ARRAY_ROWS * ARRAY_COLS;  -- 64 bytes de pesos
+    constant ACT_ENTRIES    : natural := ARRAY_ROWS * ARRAY_COLS;  -- 64 bytes de ativacoes
+    constant RESULT_ENTRIES : natural := ARRAY_ROWS * ARRAY_COLS;  -- 64 words de 32 bits
+
+    -- Numero de words (32 bits) necessarias para armazenar pesos e ativacoes
+    constant WEIGHT_WORDS : natural := WEIGHT_ENTRIES / 4;  -- 16 words para pesos
+    constant ACT_WORDS    : natural := ACT_ENTRIES / 4;     -- 16 words para ativacoes
+
+    -- Indices (em words de 32 bits, wb_adr_i(15 downto 2)) dos registradores/janelas
+    -- mapeados no barramento Wishbone. Casa exatamente com o firmware em
+    -- sw/example/test_systolic_accel/main.c e sw/example/neorv32_mnist_infer/accel_driver.c
+    constant REG_CTRL        : natural := 16#000# / 4;  -- 0x000  CTRL
+    constant REG_STATUS      : natural := 16#004# / 4;  -- 0x004  STATUS
+    constant REG_CONFIG      : natural := 16#008# / 4;  -- 0x008  CONFIG
+    constant WEIGHT_BASE_W   : natural := 16#100# / 4;  -- 0x100  WEIGHT[0..15]
+    constant ACT_BASE_W      : natural := 16#500# / 4;  -- 0x500  ACT[0..15]
+    constant RESULT_BASE_W   : natural := 16#900# / 4;  -- 0x900  RESULT[0..63]
+
+    -- Tipos de memoria: arrays de std_ulogic_vector
+    type weight_mem_t  is array (0 to WEIGHT_ENTRIES-1) of std_ulogic_vector(DATA_WIDTH-1 downto 0);
+    type act_mem_t     is array (0 to ACT_ENTRIES-1)    of std_ulogic_vector(DATA_WIDTH-1 downto 0);
+    type result_mem_t  is array (0 to RESULT_ENTRIES-1)  of std_ulogic_vector(ACC_WIDTH-1 downto 0);
+
+    -- Instancias das memorias internas
+    signal weight_mem : weight_mem_t;    -- Memoria de pesos (INT8, 64 entradas)
+    signal act_mem    : act_mem_t;       -- Memoria de ativacoes (INT8, 64 entradas)
+    signal result_mem : result_mem_t;    -- Memoria de resultados (INT32, 64 entradas)
+
+    -- Registradores de controle e status acessados via Wishbone
+    signal ctrl_reg   : std_ulogic_vector(31 downto 0);  -- Registrador de controle
+    signal config_reg : std_ulogic_vector(31 downto 0);  -- Registrador de configuracao
+    signal status_reg : std_ulogic_vector(31 downto 0);  -- Registrador de status (somente leitura)
+
+    -- Sinais de controle do array sistolico
+    signal array_start : std_ulogic;  -- Pulso para iniciar a computacao
+    signal array_clear : std_ulogic;  -- Sinal para limpar/resetar o array
+    signal array_done  : std_ulogic;  -- Indica que o array terminou a computacao
+    signal array_busy  : std_ulogic;  -- Indica que o array esta processando
+
+    -- Barramentos de dados entre o acelerador e o array sistolico
+    signal act_cols_to_array : std_ulogic_vector(ARRAY_COLS*DATA_WIDTH-1 downto 0);            -- Ativacoes (8 x INT8, uma linha do tile)
+    signal weight_to_array   : std_ulogic_vector(ARRAY_ROWS*ARRAY_COLS*DATA_WIDTH-1 downto 0);  -- Tile de pesos completo (64 x INT8)
+    signal result_from_array : std_ulogic_vector(ARRAY_COLS*ACC_WIDTH-1 downto 0);              -- Resultados (8 x INT32, uma linha do tile)
+
+    -- FSM: tipo enumerado dos estados da maquina de estados de computacao
+    type fsm_t is (
+      S_IDLE,          -- Ocioso: aguardando comando de start
+      S_LOAD_WEIGHTS,  -- Carregando pesos no array sistolico
+      S_LOAD_ACTS,     -- Carregando ativacoes no array sistolico
+      S_COMPUTE,       -- Aguardando o array terminar a computacao
+      S_STORE_RESULTS, -- Armazenando resultados na memoria
+      S_DONE           -- Computacao concluida, volta ao idle
+    );
+
+    -- Sinais da FSM de computacao
+    signal fsm_state : fsm_t;                          -- Estado atual da FSM
+    signal tile_row  : natural range 0 to ARRAY_ROWS-1;  -- Linha atual do tile de ativacoes (para iteracao)
+
+    -- Sinais de deteccao de borda para geracao de IRQ
+    signal prev_done    : std_ulogic;  -- Valor anterior de array_done (deteccao de borda de subida)
+    signal irq_pending  : std_ulogic;  -- Flag de interrupcao pendente
+
+    -- Deteccao de borda do bit start (ctrl_reg(0)): sem isso, como o software
+    -- nunca zera esse bit apos disparar, a FSM re-dispara toda a operacao de
+    -- 8 linhas assim que volta a S_IDLE (busy=0 com start ainda em '1'),
+    -- entrando em loop automatico invisivel para o software.
+    signal prev_ctrl_start : std_ulogic;
+
+  begin
+
+    -- Atribuicao dos bits do registrador de status (somente leitura)
+    status_reg(0)          <= array_busy;     -- Bit 0: array ocupado
+    status_reg(1)          <= array_done;     -- Bit 1: array concluiu
+    status_reg(2)          <= irq_pending;    -- Bit 2: interrupcao pendente
+    status_reg(31 downto 3) <= (others => '0');  -- Bits 31..3: reservados (zero)
+
+    -- Sinal de clear vem do bit 1 do registrador de controle
+    array_clear <= ctrl_reg(1);
+
+    -- Processo: Geracao de interrupcao (IRQ)
+    -- Gera uma interrupcao na borda de subida de array_done
+    -- A IRQ permanece pendente ate o software limpar via ctrl_reg(2)
+    irq_gen : process(rstn_i, clk_i)
+    begin
+      if (rstn_i = '0') then
+        -- Reset: limpa todos os sinais de IRQ
+        prev_done   <= '0';
+        irq_pending <= '0';
+        irq_o       <= '0';
+      elsif rising_edge(clk_i) then
+        -- Registra o valor anterior de array_done para detectar borda
+        prev_done <= array_done;
+
+        -- Detecta borda de subida: array_done passou de 0 para 1
+        if (array_done = '1' and prev_done = '0') then
+          irq_pending <= '1';  -- Marca IRQ como pendente
+        end if;
+
+        -- Software limpa a IRQ escrevendo 1 no bit 2 de CTRL
+        if (ctrl_reg(2) = '1') then
+          irq_pending <= '0';  -- Limpa flag de interrupcao
+        end if;
+
+        -- Sinal de IRQ ativo enquanto houver interrupcao pendente
+        irq_o <= irq_pending;
+      end if;
+    end process irq_gen;
+
+    -- Processo: Escravo Wishbone
+    -- Decodifica os ciclos de leitura/escrita no barramento Wishbone
+    -- e direciona os dados para os registradores e memorias internas.
+    -- Enderecamento por word (wb_adr_i(15 downto 2)): ver mapa de memoria no cabecalho.
+    wb_slave : process(rstn_i, clk_i)
+      variable addr_idx : natural range 0 to 16383;  -- Indice de word (extraido do endereco)
+    begin
+      if (rstn_i = '0') then
+        -- Reset: inicializa todos os registradores e saidas Wishbone
+        ctrl_reg  <= (others => '0');
+        config_reg <= (others => '0');
+        wb_ack_o  <= '0';
+        wb_err_o  <= '0';
+        wb_dat_o  <= (others => '0');
+
+      elsif rising_edge(clk_i) then
+        -- Acknowledge e error sao pulsados por 1 ciclo
+        wb_ack_o <= '0';
+        wb_err_o <= '0';
+
+        -- Verifica se ha um ciclo Wishbone valido (cyc + stb)
+        if (wb_cyc_i = '1' and wb_stb_i = '1') then
+          -- Extrai o indice de word do endereco (word-aligned, bits 15:2)
+          addr_idx := to_integer(unsigned(wb_adr_i(15 downto 2)));
+
+          -- Acknowledge: indica que a transacao sera processada neste ciclo
+          wb_ack_o <= '1';
+
+          if (wb_we_i = '1') then
+            -- Escrita: CPU esta enviando dados para o acelerador
+            if (addr_idx = REG_CTRL) then
+              -- Bit 0: start (pulso para iniciar computacao)
+              -- Bit 1: clear (resetar o array sistolico)
+              -- Bit 2: ack_irq (limpar interrupcao pendente)
+              ctrl_reg <= wb_dat_i;
+
+            elsif (addr_idx = REG_CONFIG) then
+              config_reg <= wb_dat_i;
+
+            elsif (addr_idx >= WEIGHT_BASE_W and addr_idx < WEIGHT_BASE_W + WEIGHT_WORDS) then
+              -- Escreve 4 bytes de peso (INT8 cada) na janela de pesos
+              for i in 0 to 3 loop
+                if (wb_sel_i(i) = '1') then
+                  weight_mem((addr_idx - WEIGHT_BASE_W) * 4 + i) <= wb_dat_i((i+1)*8-1 downto i*8);
+                end if;
+              end loop;
+
+            elsif (addr_idx >= ACT_BASE_W and addr_idx < ACT_BASE_W + ACT_WORDS) then
+              -- Escreve 4 bytes de ativacao (INT8 cada) na janela de ativacoes
+              for i in 0 to 3 loop
+                if (wb_sel_i(i) = '1') then
+                  act_mem((addr_idx - ACT_BASE_W) * 4 + i) <= wb_dat_i((i+1)*8-1 downto i*8);
+                end if;
+              end loop;
+
+            end if;
+            -- Escritas na janela RESULT (somente leitura) e em enderecos
+            -- desconhecidos sao ignoradas (ainda geram ack, sem efeito).
+
+          else
+            -- Leitura: CPU esta lendo dados do acelerador
+            wb_dat_o <= (others => '0');  -- Valor padrao: zero
+
+            if (addr_idx = REG_CTRL) then
+              wb_dat_o <= ctrl_reg;
+
+            elsif (addr_idx = REG_STATUS) then
+              wb_dat_o <= status_reg;
+
+            elsif (addr_idx = REG_CONFIG) then
+              wb_dat_o <= config_reg;
+
+            elsif (addr_idx >= RESULT_BASE_W and addr_idx < RESULT_BASE_W + RESULT_ENTRIES) then
+              -- Le 32 bits (INT32) da memoria de resultados
+              wb_dat_o <= result_mem(addr_idx - RESULT_BASE_W);
+
+            end if;
+          end if;
+        end if;
+      end if;
+    end process wb_slave;
+
+    -- Processo: FSM de computacao do array sistolico
+    -- Controla o carregamento de dados, execucao e armazenamento de resultados
+    -- Baseado no loop: carrega pesos -> carrega ativacoes -> computa -> store -> repete
+    compute_fsm : process(rstn_i, clk_i)
+      variable start_req : std_ulogic;  -- Requisicao de inicio (start e nao-busy e nao-clear)
+    begin
+      if (rstn_i = '0') then
+        -- Reset: volta ao estado ocioso
+        fsm_state           <= S_IDLE;
+        array_start         <= '0';
+        tile_row            <= 0;
+        act_cols_to_array   <= (others => '0');
+        weight_to_array     <= (others => '0');
+        prev_ctrl_start     <= '0';
+
+      elsif rising_edge(clk_i) then
+        -- array_start e um pulso de 1 ciclo
+        array_start <= '0';
+
+        -- Condicao de inicio: borda de subida do bit 0 de CTRL (nao o nivel),
+        -- array nao-busy, e sem clear ativo. Ver comentario de prev_ctrl_start.
+        start_req := ctrl_reg(0) and (not prev_ctrl_start) and (not array_busy) and (not array_clear);
+        prev_ctrl_start <= ctrl_reg(0);
+
+        case fsm_state is
+          -- Estado ocioso: aguarda comando de start via CTRL
+          when S_IDLE =>
+            if (start_req = '1') then
+              fsm_state <= S_LOAD_WEIGHTS;  -- Inicia carregamento do tile de pesos
+              tile_row  <= 0;                -- Comeca pela primeira linha de ativacoes
+            end if;
+
+          -- Carrega o tile de pesos 8x8 completo no array sistolico (uma vez por operacao)
+          when S_LOAD_WEIGHTS =>
+            for row in 0 to ARRAY_ROWS-1 loop
+              for col in 0 to ARRAY_COLS-1 loop
+                weight_to_array((row*ARRAY_COLS+col+1)*DATA_WIDTH-1 downto (row*ARRAY_COLS+col)*DATA_WIDTH) <=
+                  weight_mem(row * ARRAY_COLS + col);
+              end loop;
+            end loop;
+            fsm_state <= S_LOAD_ACTS;  -- Proximo: carregar ativacoes
+
+          -- Carrega 8 ativacoes (1 por coluna) no array sistolico
+          when S_LOAD_ACTS =>
+            for i in 0 to ARRAY_COLS-1 loop
+              act_cols_to_array((i+1)*DATA_WIDTH-1 downto i*DATA_WIDTH) <=
+                act_mem(tile_row * ARRAY_COLS + i);
+            end loop;
+            array_start <= '1';  -- Pulso de inicio para o array sistolico
+            fsm_state <= S_COMPUTE;  -- Proximo: aguardar resultado
+
+          -- Aguarda o array sistolico terminar a computacao.
+          -- "array_start = '0'" evita uma condicao de corrida: no proprio
+          -- ciclo em que array_start e pulsado (entrada neste estado vinda
+          -- de S_LOAD_ACTS), o array ainda nao processou o pulso -- seu
+          -- done_reg so e zerado no ciclo SEGUINTE. Sem essa guarda, o
+          -- done_reg obsoleto (ainda '1' da linha anterior) faz a FSM
+          -- concluir precocemente que a linha atual ja terminou, capturando
+          -- resultado apos 1 ciclo em vez dos 15 necessarios. So afeta a
+          -- linha 0 corretamente por acaso (done_reg comeca zerado no
+          -- reset); linhas seguintes ficavam sistematicamente erradas.
+          -- Bug real encontrado via simulacao GHDL (neorv32_systolic_matmul_tb).
+          when S_COMPUTE =>
+            if (array_done = '1' and array_start = '0') then
+              -- Armazena os resultados de cada coluna na memoria
+              for i in 0 to ARRAY_COLS-1 loop
+                result_mem(tile_row * ARRAY_COLS + i) <=
+                  result_from_array((i+1)*ACC_WIDTH-1 downto i*ACC_WIDTH);
+              end loop;
+              fsm_state <= S_STORE_RESULTS;  -- Proximo: verificar se ha mais linhas
+            end if;
+
+          -- Verifica se todas as linhas (tiles) foram processadas
+          when S_STORE_RESULTS =>
+            if (tile_row < ARRAY_ROWS - 1) then
+              -- Ainda ha linhas para processar: carrega proxima ativacao
+              tile_row  <= tile_row + 1;
+              fsm_state <= S_LOAD_ACTS;
+            else
+              -- Todas as linhas processadas: computacao concluida
+              fsm_state <= S_DONE;
+            end if;
+
+          -- Computacao concluida: volta ao estado ocioso
+          when S_DONE =>
+            fsm_state <= S_IDLE;
+
+        end case;
+      end if;
+    end process compute_fsm;
+
+    -- Instanciacao do array sistolico 8x8
+    -- Conecta os sinais internos do acelerador ao componente do array
+    systolic_array_inst : entity work.neorv32_systolic_array
+      generic map (
+        ARRAY_ROWS => ARRAY_ROWS,  -- 8 linhas
+        ARRAY_COLS => ARRAY_COLS,  -- 8 colunas
+        DATA_WIDTH  => DATA_WIDTH,  -- 8 bits por dado
+        ACC_WIDTH   => ACC_WIDTH   -- 32 bits por acumulador
+      )
+      port map (
+        clk_i      => clk_i,                  -- Clock do sistema
+        rstn_i     => rstn_i,                 -- Reset ativo-baixo
+        start_i    => array_start,            -- Pulso de inicio da computacao
+        clear_i    => array_clear,            -- Sinal de clear do array
+        act_cols_i => act_cols_to_array,      -- Linha de ativacoes atual (8xINT8)
+        weight_i   => weight_to_array,        -- Tile de pesos completo (64xINT8)
+        done_o     => array_done,             -- Sinal de conclusao
+        busy_o     => array_busy,             -- Sinal de ocupado
+        result_o   => result_from_array       -- Resultados da linha atual (8xINT32)
+      );
+
+  end neorv32_systolic_wb_rtl;

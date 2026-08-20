@@ -24,11 +24,10 @@
 char uart_getc(void) {
 
 #if (UART_EN == 1)
-  if (neorv32_uart_available(NEORV32_UART0)) {
-    return neorv32_uart_getc(NEORV32_UART0);
-  }
-#endif
+  return neorv32_uart_getc(NEORV32_UART0); // blocking read
+#else
   return 0;
+#endif
 }
 
 

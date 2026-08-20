@@ -21,40 +21,46 @@ fi
 # timeout to make sure there is enough time for the file to be sent in background
 # "BAUD" bits per second; 10 bits per byte (incl START and STOP bits); plus safety margin
 FILESIZE=$(stat -c%s "$2")
-TIMEOUT=$(( (FILESIZE / (BAUD/10)) + 2 ))
+TIMEOUT=$(( (FILESIZE / (BAUD/10)) + 10 ))
+
+# some USB-serial adapters (e.g. CH340) corrupt/drop bytes under a single
+# continuous burst at low baud rates; sending in small throttled chunks
+# avoids this while adding negligible time to the transfer
+CHUNK=16
+CHUNK_DELAY=0.01
 
 # setup serial port
 printf "Opening serial port ($1)... "
-stty -F $1 $BAUD -hup raw -echo cs8 -cstopb -ixon clocal cread
+timeout 1 cat $1 > /dev/null 2>&1 || true # drain any stale buffered input
+stty -F $1 $BAUD raw -echo cs8 -cstopb -ixon clocal cread
 exec 3<>$1
 printf "OK\n"
 
 # send executable
 printf "Uploading executable ($FILESIZE bytes)... "
 printf " u" >&3 # skip auto-boot (SPACE) and start upload ('u')
-cat $2 >&3 # send executable
-
-# wait for upload to complete and check bootloader response
-UPOLOAD_OK=0
-EXPIRED=$(( SECONDS + TIMEOUT ))
-PATTERN="OK"
-BUFFER=""
-while [ $SECONDS -lt $EXPIRED ]; do
-  if read -r -n 1 -u 3 -t 1 CH; then
-    BUFFER+=$CH
-    UPOLOAD_OK=-1
-    if [[ "$BUFFER" == *"$PATTERN"* ]]; then
-      UPOLOAD_OK=1
-      break
-    fi
-  fi
+NCHUNKS=$(( (FILESIZE + CHUNK - 1) / CHUNK ))
+for ((i=0; i<NCHUNKS; i++)); do
+  dd if="$2" bs=$CHUNK skip=$i count=1 2>/dev/null >&3
+  sleep $CHUNK_DELAY
 done
 
-if [ $UPOLOAD_OK -eq 1 ]; then
+# wait for upload to complete and check bootloader response
+RESPONSE_FILE=$(mktemp)
+timeout "$TIMEOUT" cat <&3 > "$RESPONSE_FILE" || true
+BUFFER=$(cat "$RESPONSE_FILE")
+rm -f "$RESPONSE_FILE"
+
+if [[ "$BUFFER" == *"OK"* ]]; then
+  UPOLOAD_OK=1
   printf "OK\n" >&2
-elif [ $UPOLOAD_OK -eq -1 ]; then
+elif [ -n "$BUFFER" ]; then
+  UPOLOAD_OK=-1
   printf "\nERROR! Invalid bootloader response.\n" >&2
+  printf "DEBUG raw response:\n" >&2
+  printf '%s' "$BUFFER" | xxd >&2
 else
+  UPOLOAD_OK=0
   printf "\nERROR! Bootloader response timeout ($TIMEOUT seconds).\n" >&2
 fi
 

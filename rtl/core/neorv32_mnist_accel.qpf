@@ -1,0 +1,10 @@
+# -------------------------------------------------------------------------- #
+# Quartus Prime Project File — neorv32_mnist_accel
+# Projeto integrado (Fase 3/4 do TCC): NEORV32 + SDRAM + acelerador sistolico
+# Target: DE2-115 (Cyclone IV E, EP4CE115F29C7)
+# -------------------------------------------------------------------------- #
+
+QUARTUS_VERSION = "18.1"
+DATE = "06:00:00  AUGUST 06, 2026"
+
+PROJECT_REVISION = "neorv32_mnist_accel"
