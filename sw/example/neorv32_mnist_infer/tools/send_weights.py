@@ -8,11 +8,13 @@ para enviar weights.bin e uma imagem MNIST de teste pela UART, disparar a
 inferencia e exibir a saida.
 
 Protocolo (ver sdram.c: sdram_uart_handshake_loop / sdram_uart_recv_blob):
-    placa -> host: 'R'                (ready)
+    placa -> host: 'R'                (ready, reenviado a cada ~300ms ate um comando chegar)
     host  -> placa: 1 byte de comando ('W'=pesos, 'I'=imagem, 'G'=go)
     (para 'W'/'I') host -> placa: 4 bytes little-endian com o tamanho N
-                    host -> placa: N bytes de payload
-                    placa -> host: 4 bytes little-endian ecoando N (ack)
+                    para cada pedaco de ate CHUNK_SIZE bytes:
+                      host -> placa: pedaco
+                      placa -> host: 'K' (ok, proximo pedaco) ou 'N' (falhou, reenviar o mesmo pedaco)
+                    placa -> host: 4 bytes little-endian ecoando N (ack final)
 
 Uso:
     python3 send_weights.py --port /dev/ttyUSB1 \
@@ -42,12 +44,47 @@ def recv_ready(ser, timeout_s=30):
     return False
 
 
+CHUNK_SIZE = 64
+CHUNK_ACK_TIMEOUT_S = 3
+MAX_RETRIES_PER_CHUNK = 20
+
+
+def send_chunked_with_ack(ser, data: bytes):
+    # Some USB-serial adapters (e.g. CH340) silently drop bytes under a
+    # continuous burst at low baud rates. A blind throttled send still fails
+    # on large transfers (~400 KB of weights) since a single dropped byte
+    # desyncs everything after it. Instead, each small chunk is confirmed
+    # ('K') or rejected ('N'/timeout) by the firmware, and rejected chunks
+    # are simply resent -- see sdram.c:sdram_uart_recv_blob.
+    old_timeout = ser.timeout
+    ser.timeout = CHUNK_ACK_TIMEOUT_S
+    total = len(data)
+    sent = 0
+    while sent < total:
+        chunk = data[sent:sent + CHUNK_SIZE]
+        for attempt in range(MAX_RETRIES_PER_CHUNK):
+            ser.write(chunk)
+            resp = ser.read(200)
+            print(f"[debug] offset={sent} attempt={attempt} dots={resp.count(b'.')} "
+                  f"len={len(resp)} resp={resp!r}", file=sys.stderr)
+            if resp[-1:] == b'K':
+                break
+            if attempt == MAX_RETRIES_PER_CHUNK - 1:
+                ser.timeout = old_timeout
+                sys.exit(f"[ERRO] pedaco em offset {sent} falhou apos {MAX_RETRIES_PER_CHUNK} tentativas")
+        sent += len(chunk)
+        if (sent // CHUNK_SIZE) % 200 == 0:
+            print(f"  {sent}/{total} bytes ({100*sent//total}%)", end="\r")
+    print(f"  {total}/{total} bytes (100%)")
+    ser.timeout = old_timeout
+
+
 def send_blob(ser, cmd, data: bytes):
     if not recv_ready(ser):
         sys.exit("[ERRO] timeout aguardando 'R' (ready) da placa")
     ser.write(cmd.encode())
     ser.write(struct.pack("<I", len(data)))
-    ser.write(data)
+    send_chunked_with_ack(ser, data)
     ack = ser.read(4)
     if len(ack) != 4:
         sys.exit(f"[ERRO] timeout aguardando ack de {cmd}")
@@ -96,7 +133,9 @@ def main():
     else:
         image = load_mnist_image_int8(args.mnist_index)
 
-    ser = serial.Serial(args.port, args.baud, timeout=5)
+    # weights.bin is large (~400 KB); at 19200 baud plus throttling this can
+    # take several minutes, so the read timeout must cover the ack wait too
+    ser = serial.Serial(args.port, args.baud, timeout=300)
 
     print("[*] enviando pesos...")
     send_blob(ser, 'W', weights)
