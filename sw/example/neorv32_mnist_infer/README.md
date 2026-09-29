@@ -305,6 +305,75 @@ funcionando, não a ausência de falha. Os parâmetros do IS42S16320D usados no 
 (`tSU` 1,5 ns, `tHD` 0,8 ns, `tAC` 5,4 ns, `tOH` 2,7 ns) ainda precisam ser
 conferidos no datasheet, e os atrasos de trilha da placa são estimativas.
 
+## Interface do acelerador: start sem borda e done por linha (corrigido)
+
+Dois defeitos independentes na interface que o software enxerga, ambos tornando
+o acelerador inutil na pratica depois da primeira operacao.
+
+**A -- o start nunca gerava borda.** A FSM do wrapper dispara na borda de subida
+de `CTRL[0]`, nao no nivel:
+
+```vhdl
+start_req := ctrl_reg(0) and (not prev_ctrl_start) and (not array_busy) and (not array_clear);
+```
+
+O driver escrevia `ACCEL_CTRL = 0x1` e nunca voltava a zero. Logo, so a primeira
+operacao apos o reset produzia borda; da segunda em diante o array nao iniciava.
+E como `done` continuava setado da vez anterior, o polling saia de imediato e o
+driver lia o resultado do tile ANTERIOR. A inferencia inteira usava o primeiro
+tile repetido.
+
+**B -- `STATUS.done` era por linha, nao por operacao.** O wrapper roda o array 8
+vezes (uma por linha do tile 8x8) e `STATUS[1]` refletia `array_done`, que pulsa a
+cada linha. Mesmo com o start corrigido, o software veria `done` apos a linha 0 e
+leria um tile com as outras 7 linhas ainda nao computadas.
+
+**Correcoes.** No wrapper, `op_busy`/`op_done` de nivel de operacao, setados ao
+sair de `S_IDLE` e em `S_DONE` respectivamente, expostos em `STATUS[0]`/`STATUS[1]`
+no lugar dos sinais do array. No driver, `accel_run_and_wait()` escreve `0` antes
+de `1` para gerar a borda, e volta a `0` ao final.
+
+**Por que `test_systolic_accel` passava.** Ele faz uma unica operacao logo apos o
+reset: o defeito A nao aparece (a primeira borda funciona) e o B so nao aparece
+porque o laco de polling da CPU e lento o bastante para, na maioria das vezes,
+so ler `STATUS` depois das 8 linhas terem terminado. Era um acerto por
+coincidencia de temporizacao, nao uma validacao.
+
+**Como foi encontrado.** O benchmark SW-vs-HW ja acusava "64 elementos
+divergentes" e estava documentado como limitacao em aberto, com a suspeita
+apontando para `accel_driver.c` (padding ou zero-point). Mas ele so dizia QUE
+divergia. Ao imprimir os valores, o padrao apareceu: a coluna 0 do HW era
+constante nas 8 linhas enquanto a do SW variava -- o indice da linha nao estava
+afetando o resultado. Mesma licao do caso da SDRAM: um teste que diz apenas
+"passou/falhou" nao localiza nada.
+
+**Resultado** (imagem `img_07_label7.bin`, referencia em `out/expected.txt` gerada
+por `build_mnist_int8.py`):
+
+```
+[logits] -20 -15 18 17 -12 -21 -96 87 -1 24     <- identico a referencia
+>>> Classe prevista: 7 <<<                      <- rotulo correto
+
+=== Benchmark SW vs HW (matmul 8x8x8 INT8) ===
+SW (CPU):        33350 ciclos
+HW (acelerador): 18533 ciclos
+Resultados identicos (OK)                       <- eram 64 divergentes
+```
+
+Speedup de 1,80x. Os numeros de benchmark anteriores a esta correcao nao medem
+computacao: mediam o tempo de reler resultados obsoletos.
+
+**Nota sobre o pipeline de referencia.** `build_mnist_int8.py` (PyTorch) substitui
+o `export_weights.py` (TFLite) porque simula a aritmetica do firmware bit a bit --
+requantizacao em float32 com arredondamento "half away from zero", igual ao
+`requantize()` do `inference.c`. O TFLite requantiza internamente com multiplicador
+inteiro e deslocamento, de modo que suas saidas divergiriam do firmware por
+arredondamento, ruido impossivel de distinguir de bug real. O script tambem gera
+ativacoes douradas por camada (`out/golden/<imagem>/*.bin`). Consequencia pratica:
+`weights.bin` e `model_meta.h` precisam vir sempre do mesmo gerador, na mesma
+execucao -- carregar pesos novos sobre escalas antigas nao falha visivelmente,
+so devolve numeros errados com cara de certos.
+
 ## Limitações conhecidas (documentar no TCC, Cap. 3.11)
 
 - **Classe prevista incorreta**: rodando a imagem #0 do conjunto de teste MNIST

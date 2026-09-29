@@ -159,13 +159,19 @@ int run_inference(void) {
     t1 = neorv32_cpu_get_cycle();
     neorv32_uart0_printf("[bench] dense2 : %u ciclos\n", (uint32_t)(t1 - t0));
 
-    neorv32_uart0_printf("[logits] ");
+    // Copia os logits da SDRAM para a pilha ANTES de imprimir. Imprimir lendo
+    // direto da SDRAM mistura duas coisas num mesmo laco (acesso a SDRAM e
+    // UART): se travar, nao da para saber qual foi. Com a copia, o laco de
+    // impressao nao toca a SDRAM.
+    int8_t logits[OUTPUT_CLASSES];
+    for (int i = 0; i < OUTPUT_CLASSES; i++) logits[i] = buf_b[i];
+    neorv32_uart0_printf("[logits copiados da SDRAM ok]\n[logits] ");
     for (int i = 0; i < OUTPUT_CLASSES; i++) {
-        neorv32_uart0_printf("%d ", buf_b[i]);
+        neorv32_uart0_printf("%d ", logits[i]);
     }
-    neorv32_uart0_printf("\n");
+    neorv32_uart0_printf("\n[faults ate aqui: %u]\n", (unsigned)sdram_get_fault_count());
 
-    return argmax_i8(buf_b, OUTPUT_CLASSES);
+    return argmax_i8(logits, OUTPUT_CLASSES);
 }
 
 // ---------------------------------------------------------------------------------
@@ -214,9 +220,31 @@ void bench_sw_vs_hw(void) {
         neorv32_uart0_printf("Resultados identicos (OK)\n");
     } else {
         neorv32_uart0_printf("ATENCAO: %d elementos divergentes entre SW e HW\n", mismatches);
+
+        // Saber QUE diverge nao basta; e preciso ver COMO. Hipoteses baratas:
+        int all_zero = 1, is_transp = 1, is_neg = 1;
+        for (int i = 0; i < 64; i++) if (C_hw[i] != 0) { all_zero = 0; break; }
+        for (int m = 0; m < 8; m++)
+            for (int n = 0; n < 8; n++) {
+                if (C_hw[m*8+n] != C_sw[n*8+m]) is_transp = 0;
+                if (C_hw[m*8+n] != -C_sw[m*8+n]) is_neg = 0;
+            }
+        neorv32_uart0_printf("  HW todo zero? %s | HW == transposta(SW)? %s | HW == -SW? %s\n",
+                             all_zero ? "SIM" : "nao", is_transp ? "SIM" : "nao", is_neg ? "SIM" : "nao");
+
+        neorv32_uart0_printf("  linha 0  SW:");
+        for (int n = 0; n < 8; n++) neorv32_uart0_printf(" %i", (int)C_sw[n]);
+        neorv32_uart0_printf("\n  linha 0  HW:");
+        for (int n = 0; n < 8; n++) neorv32_uart0_printf(" %i", (int)C_hw[n]);
+        neorv32_uart0_printf("\n  coluna 0 SW:");
+        for (int m = 0; m < 8; m++) neorv32_uart0_printf(" %i", (int)C_sw[m*8]);
+        neorv32_uart0_printf("\n  coluna 0 HW:");
+        for (int m = 0; m < 8; m++) neorv32_uart0_printf(" %i", (int)C_hw[m*8]);
+        neorv32_uart0_printf("\n");
     }
     if (cyc_hw > 0) {
-        neorv32_uart0_printf("Speedup HW/SW: %u.%02u x\n",
+        // printf minimo do NEORV32 nao suporta largura (%02u): imprime em centesimos
+        neorv32_uart0_printf("Speedup HW/SW: %u.%u x (centesimos)\n",
                               cyc_sw / cyc_hw, (uint32_t)(((uint64_t)(cyc_sw % cyc_hw) * 100u) / cyc_hw));
     }
 }

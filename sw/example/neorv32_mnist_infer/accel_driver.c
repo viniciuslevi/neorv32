@@ -30,10 +30,17 @@ static void accel_load_tile(volatile uint32_t *base_macro_unused, uint32_t base_
 }
 
 static void accel_run_and_wait(void) {
-    ACCEL_CTRL = 0x1; // start
+    // A FSM do acelerador dispara na BORDA DE SUBIDA de CTRL[0], nao no nivel.
+    // Escrever 0x1 repetidamente sem voltar a zero nao gera borda: a partir da
+    // segunda chamada o array nunca mais iniciava, e o polling saia de imediato
+    // pelo done anterior, devolvendo o resultado do tile anterior.
+    ACCEL_CTRL = 0x0;
+    ACCEL_CTRL = 0x1; // borda de subida -> start
     while ((ACCEL_STATUS & 0x2u) == 0u) {
-        // aguarda bit STATUS.done (polling -- ver metodologia 3.6, IRQ fica p/ trabalho futuro)
+        // STATUS[1] agora e o done da OPERACAO (tile 8x8 inteiro), nao o do
+        // array, que pulsa a cada uma das 8 linhas -- ver o wrapper VHDL.
     }
+    ACCEL_CTRL = 0x0; // deixa CTRL[0] baixo para a proxima borda
 }
 
 static void accel_read_result_tile(int32_t out[64]) {

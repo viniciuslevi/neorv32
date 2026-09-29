@@ -16,7 +16,7 @@
 // padrao do RTE avanca MEPC e PULA a instrucao que falhou (perdendo o
 // dado); aqui, em vez disso, forcamos um retry recuando MEPC de volta,
 // com um limite pra nao travar de verdade se a falha for persistente.
-#define SDRAM_FAULT_MAX_CONSECUTIVE_RETRIES 100000
+#define SDRAM_FAULT_MAX_CONSECUTIVE_RETRIES 64  // 100000 nao distinguia transitorio de quebrado
 
 static volatile uint32_t sdram_fault_last_mepc = 0;
 static volatile uint32_t sdram_fault_retry_count = 0;

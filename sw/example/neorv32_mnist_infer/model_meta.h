@@ -1,4 +1,4 @@
-// Gerado automaticamente por export_weights.py -- NAO EDITAR A MAO.
+// Gerado automaticamente por build_mnist_int8.py -- NAO EDITAR A MAO.
 // Fase 3 da metodologia do TCC: offsets/dimensoes/quantizacao do modelo
 // MNIST CNN (INT8) para carga na SDRAM e inferencia via acelerador sistolico.
 #ifndef MODEL_META_H
@@ -27,10 +27,10 @@ typedef struct {
 #define MODEL_NUM_LAYERS 4
 
 static const model_layer_t MODEL_LAYERS[MODEL_NUM_LAYERS] = {
-    { "conv1", 1, 9u, 32u, 28u, 28u, 1u, 0u, 288u, 288u, 128u, 0.003921568859368563f, -128, 0.0024763583205640316f, 0.0033952626399695873f, -128, 1 },
-    { "conv2", 1, 288u, 64u, 14u, 14u, 32u, 416u, 18432u, 18848u, 256u, 0.0033952626399695873f, -128, 0.0025886064395308495f, 0.012539160437881947f, -128, 1 },
-    { "dense1", 0, 3136u, 128u, 0u, 0u, 0u, 19104u, 401408u, 420512u, 512u, 0.012539160437881947f, -128, 0.0003844093589577824f, 0.05116873234510422f, -128, 1 },
-    { "dense2", 0, 128u, 10u, 0u, 0u, 0u, 421024u, 1280u, 422304u, 40u, 0.05116873234510422f, -128, 0.0024794461205601692f, 0.18469536304473877f, -20, 0 },
+    { "conv1", 1, 9u, 32u, 28u, 28u, 1u, 0u, 288u, 288u, 128u, 0.00392156886f, -128, 0.00472341152f, 0.00589119876f, -128, 1 },
+    { "conv2", 1, 288u, 64u, 14u, 14u, 32u, 416u, 18432u, 18848u, 256u, 0.00589119876f, -128, 0.00290589617f, 0.0223924667f, -128, 1 },
+    { "dense1", 0, 3136u, 128u, 0u, 0u, 0u, 19104u, 401408u, 420512u, 512u, 0.0223924667f, -128, 0.00213918765f, 0.109570488f, -128, 1 },
+    { "dense2", 0, 128u, 10u, 0u, 0u, 0u, 421024u, 1280u, 422304u, 40u, 0.109570488f, -128, 0.00162068324f, 0.18547374f, 6, 0 },
 };
 
 #define LAYER_CONV1 0
@@ -41,11 +41,11 @@ static const model_layer_t MODEL_LAYERS[MODEL_NUM_LAYERS] = {
 #define INPUT_H 28
 #define INPUT_W 28
 #define INPUT_C 1
-#define INPUT_SCALE 0.003921568859368563f
+#define INPUT_SCALE 0.00392156886f
 #define INPUT_ZERO_POINT -128
 
 #define OUTPUT_CLASSES 10
-#define OUTPUT_SCALE 0.18469536304473877f
-#define OUTPUT_ZERO_POINT -20
+#define OUTPUT_SCALE 0.18547374f
+#define OUTPUT_ZERO_POINT 6
 
 #endif // MODEL_META_H

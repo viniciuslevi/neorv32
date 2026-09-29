@@ -97,6 +97,12 @@
     signal array_clear : std_ulogic;  -- Sinal para limpar/resetar o array
     signal array_done  : std_ulogic;  -- Indica que o array terminou a computacao
     signal array_busy  : std_ulogic;  -- Indica que o array esta processando
+    -- busy/done da OPERACAO INTEIRA (tile 8x8), distintos do done do array, que
+    -- pulsa a cada uma das 8 linhas. O software precisa do nivel de operacao:
+    -- polling em array_done retornava logo apos a linha 0, lendo um tile com as
+    -- outras 7 linhas ainda nao computadas.
+    signal op_busy : std_ulogic;
+    signal op_done : std_ulogic;
 
     -- Barramentos de dados entre o acelerador e o array sistolico
     signal act_cols_to_array : std_ulogic_vector(ARRAY_COLS*DATA_WIDTH-1 downto 0);            -- Ativacoes (8 x INT8, uma linha do tile)
@@ -130,8 +136,8 @@
   begin
 
     -- Atribuicao dos bits do registrador de status (somente leitura)
-    status_reg(0)          <= array_busy;     -- Bit 0: array ocupado
-    status_reg(1)          <= array_done;     -- Bit 1: array concluiu
+    status_reg(0)          <= op_busy;        -- Bit 0: operacao (tile 8x8) em curso
+    status_reg(1)          <= op_done;        -- Bit 1: operacao concluida
     status_reg(2)          <= irq_pending;    -- Bit 2: interrupcao pendente
     status_reg(31 downto 3) <= (others => '0');  -- Bits 31..3: reservados (zero)
 
@@ -259,6 +265,8 @@
         -- Reset: volta ao estado ocioso
         fsm_state           <= S_IDLE;
         array_start         <= '0';
+        op_busy             <= '0';
+        op_done             <= '0';
         tile_row            <= 0;
         act_cols_to_array   <= (others => '0');
         weight_to_array     <= (others => '0');
@@ -273,12 +281,19 @@
         start_req := ctrl_reg(0) and (not prev_ctrl_start) and (not array_busy) and (not array_clear);
         prev_ctrl_start <= ctrl_reg(0);
 
+        if (array_clear = '1') then
+          op_busy <= '0';
+          op_done <= '0';
+        end if;
+
         case fsm_state is
           -- Estado ocioso: aguarda comando de start via CTRL
           when S_IDLE =>
             if (start_req = '1') then
               fsm_state <= S_LOAD_WEIGHTS;  -- Inicia carregamento do tile de pesos
               tile_row  <= 0;                -- Comeca pela primeira linha de ativacoes
+              op_busy   <= '1';
+              op_done   <= '0';
             end if;
 
           -- Carrega o tile de pesos 8x8 completo no array sistolico (uma vez por operacao)
@@ -335,6 +350,8 @@
           -- Computacao concluida: volta ao estado ocioso
           when S_DONE =>
             fsm_state <= S_IDLE;
+            op_busy   <= '0';
+            op_done   <= '1';  -- so agora as 8 linhas estao em result_mem
 
         end case;
       end if;
