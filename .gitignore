@@ -40,3 +40,12 @@ riscof_work
 # generated documentation stuff
 /docs/doxygen_build/
 /docs/public/
+
+# Quartus build artifacts (projeto TCC em rtl/core)
+/rtl/core/db/
+/rtl/core/incremental_db/
+/rtl/core/greybox_tmp/
+/rtl/core/output_files_mnist_accel/
+/rtl/core/simulation/
+/rtl/core/*.ipregen.rpt
+/rtl/core/*_assignment_defaults.qdf
