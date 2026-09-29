@@ -99,6 +99,7 @@ architecture neorv32_de2115_mnist_top_rtl of neorv32_de2115_mnist_top is
   signal accel_irq : std_ulogic;
 
   signal con_gpio_out : std_ulogic_vector(31 downto 0);
+  signal con_gpio_in  : std_ulogic_vector(31 downto 0);
 
   signal sdram_pll_locked : std_ulogic;
   signal sdram_clk_pll_out : std_logic;
@@ -163,6 +164,7 @@ begin
     clk_i       => clk_i,
     rstn_i      => rstn_sync,
     gpio_o      => con_gpio_out,
+    gpio_i      => con_gpio_in,
     uart0_txd_o => uart0_txd_o,
     uart0_rxd_i => uart0_rxd_i,
     xbus_adr_o  => xbus_adr,
@@ -269,6 +271,10 @@ begin
   -- LEDs de status ------------------------------------------------------------------
   -- LEDG[7:0]: 8 LSBs do GPIO de proposito geral do NEORV32 (uso livre do firmware)
   -- LEDR[0]: heartbeat de reset liberado | LEDR[1]: acelerador ocupado
+  -- KEY[1] chega ao software em gpio_i(0). O botao da DE2-115 e ativo-baixo;
+  -- invertemos aqui para que '1' signifique "pressionado" no firmware.
+  con_gpio_in <= (0 => not key_n(1), others => '0');
+
   ledg_o <= con_gpio_out(7 downto 0);
 
   -- LCD: dados em gpio[15:8], RS em gpio[16], EN em gpio[17]. RW fixo em 0

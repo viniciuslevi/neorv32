@@ -2,6 +2,7 @@
 // NEORV32 MNIST Inference (Fase 3/4 do TCC) - Acesso a SDRAM e carga via UART      //
 // ================================================================================ //
 #include "sdram.h"
+#include "lcd.h"
 #include <neorv32.h>
 
 #define BLOB_CHUNK_SIZE  64
@@ -156,10 +157,21 @@ void sdram_uart_handshake_loop(void) {
         }
         char cmd = neorv32_uart0_char_received_get();
         if (cmd == 'W') {
+            lcd_clear();
+            lcd_goto(0, 0); lcd_puts("Recebendo pesos");
+            lcd_goto(1, 0); lcd_puts("422 KB via UART");
             uint32_t n = sdram_uart_recv_blob(SDRAM_OFF_WEIGHTS);
+            lcd_clear();
+            lcd_goto(0, 0); lcd_puts("Pesos na SDRAM");
+            lcd_goto(1, 0); lcd_puti((int32_t)n); lcd_puts(" bytes");
             neorv32_uart0_printf("\n[sdram] pesos recebidos: %u bytes\n", n);
         } else if (cmd == 'I') {
+            lcd_clear();
+            lcd_goto(0, 0); lcd_puts("Recebendo imagem");
             uint32_t n = sdram_uart_recv_blob(SDRAM_OFF_INPUT);
+            lcd_clear();
+            lcd_goto(0, 0); lcd_puts("Imagem recebida");
+            lcd_goto(1, 0); lcd_puti((int32_t)n); lcd_puts(" bytes");
             neorv32_uart0_printf("\n[sdram] imagem recebida: %u bytes\n", n);
         } else if (cmd == 'G') {
             return;

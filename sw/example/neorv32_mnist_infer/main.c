@@ -15,6 +15,19 @@
 #include "lcd.h"
 #include "model_meta.h"
 
+
+// KEY[1] chega em gpio_i(0) ja invertido pelo top-level: '1' = pressionado.
+// Espera um clique completo (pressionar e soltar), com anti-repique simples,
+// para que o resultado permaneca no LCD ate o operador pedir a proxima imagem.
+static void wait_key1(void) {
+    uint32_t clk = neorv32_sysinfo_get_clk();
+    while (neorv32_gpio_pin_get(0) != 0) { }   // se ja estiver premido, espera soltar
+    while (neorv32_gpio_pin_get(0) == 0) { }   // espera pressionar
+    neorv32_aux_delay_ms(clk, 20);
+    while (neorv32_gpio_pin_get(0) != 0) { }   // espera soltar
+    neorv32_aux_delay_ms(clk, 20);
+}
+
 int main(void) {
     neorv32_uart0_setup(19200, 0);
     neorv32_rte_setup(); // instala handlers de debug para excecoes/interrupcoes nao tratadas
@@ -49,8 +62,14 @@ int main(void) {
         neorv32_uart0_printf("\n>>> Classe prevista: %d <<<\n", classe);
 
         lcd_clear();
-        lcd_goto(0, 0); lcd_puts("Classe prevista:");
-        lcd_goto(1, 6); lcd_puti(classe);
+        lcd_goto(0, 0); lcd_puts("Classe: ");
+        lcd_puti(classe);
+        lcd_goto(1, 0); lcd_puts("KEY1 = proxima");
+
+        // Segura o resultado no display ate o clique: sem isso o laco voltava
+        // ao handshake e limpava o LCD antes de dar tempo de ler.
+        neorv32_uart0_printf("(pressione KEY1 na placa para a proxima imagem)\n");
+        wait_key1();
     }
 
     return 0;

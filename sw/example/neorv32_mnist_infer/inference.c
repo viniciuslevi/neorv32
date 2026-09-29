@@ -7,6 +7,7 @@
 // parametros de quantizacao gerados por export_weights.py em model_meta.h.         //
 // ================================================================================ //
 #include "inference.h"
+#include "lcd.h"
 #include "accel_driver.h"
 #include "sdram.h"
 #include "model_meta.h"
@@ -130,31 +131,37 @@ int run_inference(void) {
     uint64_t t0, t1;
 
     t0 = neorv32_cpu_get_cycle();
+    lcd_goto(1, 0); lcd_puts("camada: conv1  ");
     conv2d_layer(&MODEL_LAYERS[LAYER_CONV1], input, buf_a); // -> 28x28x32
     t1 = neorv32_cpu_get_cycle();
     neorv32_uart0_printf("[bench] conv1  : %u ciclos\n", (uint32_t)(t1 - t0));
 
     t0 = neorv32_cpu_get_cycle();
+    lcd_goto(1, 0); lcd_puts("camada: pool1  ");
     maxpool2x2(buf_a, 28, 28, 32, buf_b); // -> 14x14x32
     t1 = neorv32_cpu_get_cycle();
     neorv32_uart0_printf("[bench] pool1  : %u ciclos\n", (uint32_t)(t1 - t0));
 
     t0 = neorv32_cpu_get_cycle();
+    lcd_goto(1, 0); lcd_puts("camada: conv2  ");
     conv2d_layer(&MODEL_LAYERS[LAYER_CONV2], buf_b, buf_a); // -> 14x14x64
     t1 = neorv32_cpu_get_cycle();
     neorv32_uart0_printf("[bench] conv2  : %u ciclos\n", (uint32_t)(t1 - t0));
 
     t0 = neorv32_cpu_get_cycle();
+    lcd_goto(1, 0); lcd_puts("camada: pool2  ");
     maxpool2x2(buf_a, 14, 14, 64, buf_b); // -> 7x7x64 (=3136, ja "achatado" em HWC)
     t1 = neorv32_cpu_get_cycle();
     neorv32_uart0_printf("[bench] pool2  : %u ciclos\n", (uint32_t)(t1 - t0));
 
     t0 = neorv32_cpu_get_cycle();
+    lcd_goto(1, 0); lcd_puts("camada: dense1 ");
     dense_layer(&MODEL_LAYERS[LAYER_DENSE1], buf_b, buf_a); // -> 128
     t1 = neorv32_cpu_get_cycle();
     neorv32_uart0_printf("[bench] dense1 : %u ciclos\n", (uint32_t)(t1 - t0));
 
     t0 = neorv32_cpu_get_cycle();
+    lcd_goto(1, 0); lcd_puts("camada: dense2 ");
     dense_layer(&MODEL_LAYERS[LAYER_DENSE2], buf_a, buf_b); // -> 10 (logits)
     t1 = neorv32_cpu_get_cycle();
     neorv32_uart0_printf("[bench] dense2 : %u ciclos\n", (uint32_t)(t1 - t0));
