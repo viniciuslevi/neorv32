@@ -248,20 +248,62 @@ palavras de 32 bits por padrão):
 | Erros classificados como endereço | 100% | **0** |
 | Bits afetados (teste A) | 2,3,4,5,6,7,8,9 | só o 3 |
 
-**Defeito residual, ainda aberto.** Sob valores únicos, permanece corrupção em
-poucos bits de `DQ[15:0]`; `DQ[31:16]` nunca erra. A contagem direcional descarta
-pino preso em `DQ[0]` (1012 erros, 512 numa direção e 500 na outra — ruído, não
-stuck-at), embora `DQ[3]` e `DQ[15]` errem só numa direção. A hipótese atual é
-ruído de chaveamento simultâneo: padrões uniformes não alternam bit nenhum entre
-acessos consecutivos e passam; valores únicos alternam muitos e falham. Isso é
-margem de captura, favorecida pelo fato de o SDC do projeto
-(`neorv32_mnist_accel.sdc`) não restringir *nada* da interface SDRAM — não há
-`create_generated_clock` para a saída do PLL nem `set_input_delay`/
-`set_output_delay` em qualquer pino de dado, endereço ou controle. O slack de
-5,15 ns que o Timing Analyzer reporta cobre apenas a lógica interna em `clk_i`; o
-caminho FPGA↔chip nunca foi analisado, e os -2 ns de defasagem do PLL foram
-ajustados empiricamente contra o roteamento de uma compilação específica.
-Próximo passo: escrever o SDC da interface com os parâmetros do IS42S16320D.
+**Segundo defeito: DRAM_CLK nunca veio do PLL.** O commit 27b6f5f3 descreve ter
+substituído o inversor combinacional por um PLL defasado, mas no código a saída
+`c0` ficou em `open` e `dram_clk_o <= not clk_i` permaneceu, marcado como
+"DIAGNOSTICO TEMPORARIO". O PLL existia apenas para o sinal `locked`. Ou seja, a
+fase configurada no `sdram_clk_pll_core` nunca esteve em vigor, e o clock que o
+chip recebia saía de lógica combinacional roteada genericamente até o pino --
+exatamente a condição que a correção pretendia eliminar.
+
+Corrigido conectando `c0` a `dram_clk_o`, com defasagem de 180° (`-10000` ps).
+São 180° porque é a relação que a FSM do controlador pressupõe: ela troca
+endereço/comando na borda de `clk_i` e espera que o chip amostre meio ciclo
+depois. É a mesma fase do `not clk_i` original, mas agora através da rede de
+clock dedicada do PLL em vez de roteamento genérico.
+
+**O SDC da interface SDRAM.** A versão anterior de `neorv32_mnist_accel.sdc`
+tinha quatro linhas e restringia apenas `clk_i`. O Timing Analyzer reportava
+5,49 ns de folga -- cobrindo só a lógica interna. O caminho FPGA↔chip nunca foi
+analisado, e o fitter roteava os pinos de dado e endereço sem meta de timing.
+Com o SDC completo (`create_generated_clock` para o pino DRAM_CLK,
+`set_output_delay`/`set_input_delay` nos pinos de dado, endereço, comando e
+máscara), a mesma compilação passou a acusar **-2,884 ns no caminho de leitura**
+`dram_dq_io[*] -> clk_i`. O relatório antigo dava uma garantia que não cobria a
+interface onde estava o problema.
+
+**Limite do método: a análise de timing sozinha escolheu errado.** Com o SDC no
+lugar, uma varredura de fase indicou 0 ps como ótimo (folga de +4,13 ns na
+leitura e +7,11 ns na escrita). Em hardware, 0 ps produziu deslocamento de
+endereço de exatamente uma palavra em 100% dos acessos -- o mapa de bits do
+teste A virou a sequência 1024, 512, 256, 128, 64, 32, 16, 8, assinatura de
+soma de 4 bytes com propagação de vai-um. A razão: com fase 0 o chip amostra na
+mesma borda em que o FPGA troca o barramento, e o TimeQuest resolve isso
+escolhendo a borda de captura seguinte (janela de 20 ns, folga aparente enorme),
+relação que não é a que a FSM implementa. Para o SDC refletir o projeto de fato
+seria preciso declarar, com `set_multicycle_path`, em que ciclo cada comando
+deve ser capturado. Registrado aqui porque é um resultado metodológico: o SDC
+tornou o problema *visível e quantificável*, mas o valor final só foi validado
+em hardware.
+
+**Resultado final** (DE2-115, quatro offsets, 256 palavras de 32 bits por padrão,
+incluindo o padrão endereço-como-dado que nunca havia passado):
+
+```
+-- A) TOTAL: 0 palavras com erro em 5120
+-- B) DQ[15:0] = 0 erros | DQ[31:16] = 0 erros
+-- E) 0/256 erradas | ENDERECO=0 DADO=0 | faults wr=0 rd=0
+-- F) 0/256 erradas na conferencia imediata
+===== FIM (PASS) =====
+```
+
+**Ainda em aberto.** O contador acusa 142 access faults retentados com 0 erros de
+dado. São falhas transitórias de ack dentro do `XBUS_TIMEOUT` -- o mesmo sintoma
+que 27b6f5f3 descreveu sem isolar. Os dados saem corretos porque
+`sdram_install_fault_retry_handler` reexecuta a instrução, mas isso é o retry
+funcionando, não a ausência de falha. Os parâmetros do IS42S16320D usados no SDC
+(`tSU` 1,5 ns, `tHD` 0,8 ns, `tAC` 5,4 ns, `tOH` 2,7 ns) ainda precisam ser
+conferidos no datasheet, e os atrasos de trilha da placa são estimativas.
 
 ## Limitações conhecidas (documentar no TCC, Cap. 3.11)
 

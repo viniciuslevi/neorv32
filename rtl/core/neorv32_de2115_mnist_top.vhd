@@ -92,6 +92,7 @@ architecture neorv32_de2115_mnist_top_rtl of neorv32_de2115_mnist_top is
   signal con_gpio_out : std_ulogic_vector(31 downto 0);
 
   signal sdram_pll_locked : std_ulogic;
+  signal sdram_clk_pll_out : std_logic;
   signal sdram_rstn       : std_ulogic;
 
 begin
@@ -110,15 +111,15 @@ begin
   port map (
     areset => not rstn_sync, -- areset do ALTPLL e ativo-alto
     inclk0 => clk_i,
-    c0     => open, -- DIAGNOSTICO: PLL instanciado so para o LED de locked,
-                     -- dram_clk_o volta a vir do inversor simples abaixo
+    c0     => sdram_clk_pll_out,
     locked => sdram_pll_locked
   );
 
-  -- DIAGNOSTICO TEMPORARIO: volta ao inversor simples para isolar se o PLL
-  -- (mesmo travado, LED confirma) e a causa da regressao "tudo 0xff", ou se
-  -- e outra coisa. Ver comentario da instancia do PLL acima.
-  dram_clk_o <= not clk_i;
+  -- DRAM_CLK vem do PLL (defasagem de -2 ns), nao de um inversor combinacional.
+  -- O inversor puro (not clk_i) deixava a fase real no pino a merce do atraso de
+  -- roteamento generico do FPGA, sem rede de clock dedicada -- justamente a
+  -- condicao que produz captura marginal nas linhas de dado.
+  dram_clk_o <= std_ulogic(sdram_clk_pll_out);
 
   -- Sincronizador de reset (KEY[0] ativo-baixo, 2 flip-flops) ----------------------
   sync_rst: process(clk_i)
