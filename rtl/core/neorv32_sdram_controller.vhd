@@ -148,7 +148,10 @@ begin
 
   -- Decompoe o endereco de word Wishbone (25 bits) em banco/linha/coluna.
   -- wb_adr_i e byte-endereco; bits (26 downto 2) formam o endereco de word de 32 bits.
-  req_addr <= wb_adr_i(26 downto 2);
+  -- req_addr e REGISTRADO em latch_req (nao derivado de wb_adr_i combinacionalmente):
+  -- a FSM leva varios ciclos entre ACTIVE e READ/WRITE, e wb_adr_i pode mudar nesse
+  -- intervalo -- o que fazia ACTIVE capturar a linha de um endereco e READ/WRITE a
+  -- coluna de outro, gravando/lendo na palavra vizinha.
   bank_sel <= req_addr(24 downto 23);
   row_sel  <= req_addr(22 downto 10);
   col_sel  <= req_addr(9 downto 0);
@@ -167,12 +170,14 @@ begin
   begin
     if (rstn_i = '0') then
       req_pending <= '0';
+      req_addr    <= (others => '0');
       req_wdata   <= (others => '0');
       req_sel     <= (others => '0');
       req_we      <= '0';
     elsif rising_edge(clk_i) then
       if (state = S_IDLE and wb_cyc_i = '1' and wb_stb_i = '1' and req_pending = '0') then
         req_pending <= '1';
+        req_addr    <= wb_adr_i(26 downto 2);
         req_wdata   <= wb_dat_i;
         req_sel     <= wb_sel_i;
         req_we      <= wb_we_i;

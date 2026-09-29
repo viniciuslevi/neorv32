@@ -11,6 +11,7 @@
 #include "sdram.h"
 #include "accel_driver.h"
 #include "inference.h"
+#include "sdram_diag.h"
 #include "model_meta.h"
 
 int main(void) {
@@ -21,22 +22,7 @@ int main(void) {
     neorv32_uart0_printf("Modelo: %u camadas, %u bytes de pesos\n", (unsigned)MODEL_NUM_LAYERS, (unsigned)MODEL_WEIGHTS_BYTES);
     neorv32_uart0_printf("SDRAM base: 0x%x\n", (unsigned)SDRAM_BASE);
 
-    neorv32_uart0_printf("\n[dbg] SDRAM smoke test: escrevendo 16 bytes...\n");
-    volatile uint8_t *sdram_test = (volatile uint8_t*)SDRAM_ADDR(0);
-    for (int i = 0; i < 16; i++) {
-        sdram_test[i] = (uint8_t)(0xA0 + i);
-    }
-    neorv32_uart0_printf("[dbg] SDRAM smoke test: lendo de volta...\n");
-    int sdram_ok = 1;
-    for (int i = 0; i < 16; i++) {
-        uint8_t v = sdram_test[i];
-        if (v != (uint8_t)(0xA0 + i)) {
-            neorv32_uart0_printf("[dbg] MISMATCH em %d: esperado 0x%x, lido 0x%x\n", i, 0xA0 + i, v);
-            sdram_ok = 0;
-        }
-    }
-    neorv32_uart0_printf("[dbg] SDRAM smoke test: %s (faults retentados: %u)\n",
-                          sdram_ok ? "PASS" : "FAIL", (unsigned)sdram_get_fault_count());
+    sdram_diag_run(); // bateria completa: mapa de erros por bit, estabilidade, faults
 
     neorv32_uart0_printf("\nAguardando handshake UART (host: tools/send_weights.py)...\n");
     sdram_uart_handshake_loop();

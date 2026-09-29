@@ -14,7 +14,7 @@ Fase 4 ("Inferência end-to-end") da [Metodologia](../../../rtl/core/docs/) do T
 | `neorv32_systolic_wb_accelerator.vhd` | Wrapper Wishbone realinhado para o mapa de memória em janelas (`CTRL`/`STATUS`/`CONFIG` + janelas `WEIGHT`/`ACT`/`RESULT`) que o firmware já pressupunha (`sw/example/test_systolic_accel/main.c` foi escrito contra esse mapa antes de a RTL implementá-lo). |
 | `neorv32_sdram_controller.vhd` | Controlador SDRAM próprio (Wishbone-classic, política *close-page*), para os 2× ISSI IS42S16320D da DE2-115. Substitui a IP do Quartus (MegaWizard/IP Catalog não disponível via linha de comando neste ambiente de desenvolvimento). Inclui agora um estado `S_WRITE_RECOVER` para respeitar tWR (write recovery) entre o comando WRITE e o PRECHARGE seguinte, que faltava por completo na versão original. |
 | `neorv32_xbus_wb_gateway.vhd` | Decodificador de endereço: XBUS do NEORV32 → SDRAM (`0xA0000000`) ou acelerador (`0x90000000`). |
-| `neorv32_de2115_mnist_top.vhd` | Top-level integrado: NEORV32 (RV32IMC) + gateway + SDRAM + acelerador, pinagem DE2-115. `DRAM_CLK` agora vem de um PLL dedicado (`sdram_clk_pll_core`) com defasagem de -3 ns em vez de um inversor combinacional puro (`not clk_i`); o reset do controlador SDRAM fica retido até o PLL travar (`locked`). |
+| `neorv32_de2115_mnist_top.vhd` | Top-level integrado: NEORV32 (RV32IMC) + gateway + SDRAM + acelerador, pinagem DE2-115. `DRAM_CLK` agora vem de um PLL dedicado (`sdram_clk_pll_core`) com defasagem de -2 ns em vez de um inversor combinacional puro (`not clk_i`); o reset do controlador SDRAM fica retido até o PLL travar (`locked`). |
 | `sdram_clk_pll_core.vhd`/`.qip` | PLL (ALTPLL) para `DRAM_CLK`, gerado via `qmegawiz -silent` (linha de comando, sem MegaWizard/IP Catalog — ver seção "Bring-up em hardware real" abaixo). |
 | `neorv32_mnist_accel.qsf`/`.qpf` | Projeto Quartus separado (convive com `kai.qsf` da Fase 1), pinos de SDRAM extraídos de `DE2_115_pin_assignments.xlsx` (Terasic). |
 
@@ -73,6 +73,11 @@ quartus_sh --flow compile neorv32_mnist_accel
 
 # 4. Programar a DE2-115 e subir o firmware via bootloader NEORV32 (UART)
 #    (ver sw/bootloader/ e a documentação padrão do NEORV32 para o fluxo de upload)
+#    Linux:   make upload UART_TTY=/dev/ttyUSB1
+#    Windows: pip install pyserial && make upload_py UART_TTY=COM17
+#             (uart_upload.sh não funciona no Windows: o stty do MSYS/Git Bash não
+#              configura portas COM; upload_py usa sw/image_gen/uart_upload.py)
+#    Resete o processador antes de rodar o upload.
 
 # 5. No PC, enviar pesos + imagem e rodar a inferência
 python3 tools/send_weights.py --port /dev/ttyUSB1 \
@@ -145,7 +150,7 @@ na ordem em que apareceram:
    combinacional puro (`not clk_i`) alimentando o pino direto — sem um PLL/rede de
    clock dedicada, a fase real na placa fica sujeita ao atraso de roteamento genérico
    do FPGA, que a simulação (SDRAM ideal, sem esse atraso) não captura. Corrigido com
-   um PLL (ALTPLL) dedicado, com defasagem de -3 ns. Como a GUI do Quartus (IP
+   um PLL (ALTPLL) dedicado, com defasagem de -2 ns. Como a GUI do Quartus (IP
    Catalog/MegaWizard) travava neste ambiente, o PLL foi gerado via linha de comando
    (`qmegawiz -silent`, ver comando abaixo) — o wizard interativo depende de
    bibliotecas (`libpng12`, `libccl_*`, `libQtCore.so.4` etc.) que só existem dentro
@@ -193,6 +198,70 @@ qmegawiz -silent module=altpll intended_device_family="Cyclone IV E" operation_m
 Note que o `qmegawiz` também gera um `.qip` — ele precisa ser adicionado ao projeto
 via `set_global_assignment -name QIP_FILE sdram_clk_pll_core.qip` no `.qsf` (não
 `VHDL_FILE`), senão o Quartus não elabora os parâmetros internos do PLL corretamente.
+
+## Endereço não registrado no controlador SDRAM (bug de raiz, corrigido)
+
+Bug encontrado depois do primeiro bring-up, responsável por corrupção sistemática
+da SDRAM — e provável causa da classe prevista incorreta.
+
+**O defeito.** Em `neorv32_sdram_controller.vhd`, o processo `latch_req` registrava
+`req_wdata`, `req_sel` e `req_we` no instante em que a requisição Wishbone era
+aceita, mas o endereço não: `req_addr` vinha de uma atribuição concorrente,
+`req_addr <= wb_adr_i(26 downto 2)`, e portanto acompanhava `wb_adr_i`
+combinacionalmente durante toda a FSM. Como a máquina leva vários ciclos entre
+ACTIVE e READ/WRITE (espera de tRCD, depois PRECHARGE), qualquer mudança em
+`wb_adr_i` nesse intervalo fazia o comando ACTIVE capturar a linha de um endereço
+e o READ/WRITE capturar a coluna de outro. Resultado: dados gravados e lidos na
+palavra vizinha.
+
+**Correção.** Registrar `req_addr` junto com o restante da requisição, no mesmo
+ciclo, dentro de `latch_req`.
+
+**Por que a simulação não pegou.** `sim/neorv32_sdram_controller_tb.vhd` passa nos
+dois testes. A testbench mantém `wb_adr_i` estável durante toda a transação — é o
+que uma testbench escrita à mão naturalmente faz. O mestre Wishbone real, não. O
+defeito estava exatamente na interface com o mestre real, fora do que o modelo
+idealizado exercitava. Esse é o achado metodológico mais relevante do episódio.
+
+**Por que o smoke test original não bastou.** O teste de 16 bytes de `main.c`
+detectava *que* havia erro, mas não *qual*. Foi preciso um diagnóstico melhor
+(`sdram_diag.c`) para localizar a causa. O ponto central: **padrões uniformes são
+cegos a erro de endereçamento**. Escrevendo `0xAAAAAAAA` em toda parte, ler do
+endereço errado devolve o valor certo, e o teste passa. Só valores únicos por
+palavra revelam o problema — no teste com `0x00000000`, `0xFFFFFFFF`, `0xAAAAAAAA`
+e `0x55555555` o resultado era 0 erros, enquanto o padrão endereço-como-dado dava
+256/256 palavras erradas.
+
+Uma armadilha adicional, vivida durante a investigação: gravar `TAG + i` faz
+palavras vizinhas diferirem num único bit, e aí "leu o endereço errado" e "leu o
+bit 0 corrompido" produzem exatamente a mesma evidência. Trocar o valor para
+`TAG + i*0x55` separa os dois casos — o valor lido ou é múltiplo válido de `0x55`
+(endereço) ou não é (dado).
+
+**Resultado medido** (DE2-115, quatro offsets em bancos/linhas distintos, 256
+palavras de 32 bits por padrão):
+
+| | antes | depois |
+|---|---|---|
+| Padrões uniformes | 0 erros | 0 erros |
+| Padrão endereço-como-dado | 1024 erros | 153–159 |
+| Erros classificados como endereço | 100% | **0** |
+| Bits afetados (teste A) | 2,3,4,5,6,7,8,9 | só o 3 |
+
+**Defeito residual, ainda aberto.** Sob valores únicos, permanece corrupção em
+poucos bits de `DQ[15:0]`; `DQ[31:16]` nunca erra. A contagem direcional descarta
+pino preso em `DQ[0]` (1012 erros, 512 numa direção e 500 na outra — ruído, não
+stuck-at), embora `DQ[3]` e `DQ[15]` errem só numa direção. A hipótese atual é
+ruído de chaveamento simultâneo: padrões uniformes não alternam bit nenhum entre
+acessos consecutivos e passam; valores únicos alternam muitos e falham. Isso é
+margem de captura, favorecida pelo fato de o SDC do projeto
+(`neorv32_mnist_accel.sdc`) não restringir *nada* da interface SDRAM — não há
+`create_generated_clock` para a saída do PLL nem `set_input_delay`/
+`set_output_delay` em qualquer pino de dado, endereço ou controle. O slack de
+5,15 ns que o Timing Analyzer reporta cobre apenas a lógica interna em `clk_i`; o
+caminho FPGA↔chip nunca foi analisado, e os -2 ns de defasagem do PLL foram
+ajustados empiricamente contra o roteamento de uma compilação específica.
+Próximo passo: escrever o SDC da interface com os parâmetros do IS42S16320D.
 
 ## Limitações conhecidas (documentar no TCC, Cap. 3.11)
 
