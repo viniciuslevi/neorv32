@@ -12,6 +12,7 @@
 #include "accel_driver.h"
 #include "inference.h"
 #include "sdram_diag.h"
+#include "lcd.h"
 #include "model_meta.h"
 
 int main(void) {
@@ -22,17 +23,35 @@ int main(void) {
     neorv32_uart0_printf("Modelo: %u camadas, %u bytes de pesos\n", (unsigned)MODEL_NUM_LAYERS, (unsigned)MODEL_WEIGHTS_BYTES);
     neorv32_uart0_printf("SDRAM base: 0x%x\n", (unsigned)SDRAM_BASE);
 
+    lcd_init();
+    lcd_goto(0, 0); lcd_puts("NEORV32 + MNIST");
+    lcd_goto(1, 0); lcd_puts("testando SDRAM");
+
     sdram_diag_run(); // bateria completa: mapa de erros por bit, estabilidade, faults
 
-    neorv32_uart0_printf("\nAguardando handshake UART (host: tools/send_weights.py)...\n");
-    sdram_uart_handshake_loop();
+    bench_sw_vs_hw(); // uma vez, antes do laco: nao depende de pesos nem de imagem
 
-    neorv32_uart0_printf("\nExecutando inferencia...\n");
-    int classe = run_inference();
-    neorv32_uart0_printf("\n>>> Classe prevista: %d <<<\n", classe);
+    // Apos cada inferencia volta ao handshake, para receber a proxima imagem sem
+    // reenviar os 422 KB de pesos nem refazer o upload do firmware. Envie os pesos
+    // uma vez; depois basta a imagem + go por imagem.
+    while (1) {
+        lcd_clear();
+        lcd_goto(0, 0); lcd_puts("Aguardando");
+        lcd_goto(1, 0); lcd_puts("imagem via UART");
+        neorv32_uart0_printf("\nAguardando handshake UART (host: tools/send_weights.py)...\n");
+        sdram_uart_handshake_loop();
 
-    bench_sw_vs_hw();
+        lcd_clear();
+        lcd_goto(0, 0); lcd_puts("Inferindo...");
 
-    neorv32_uart0_printf("\n=== Fim ===\n");
+        neorv32_uart0_printf("\nExecutando inferencia...\n");
+        int classe = run_inference();
+        neorv32_uart0_printf("\n>>> Classe prevista: %d <<<\n", classe);
+
+        lcd_clear();
+        lcd_goto(0, 0); lcd_puts("Classe prevista:");
+        lcd_goto(1, 6); lcd_puti(classe);
+    }
+
     return 0;
 }

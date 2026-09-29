@@ -44,6 +44,15 @@ entity neorv32_de2115_mnist_top is
 
     -- LEDs de status --
     ledg_o : out std_ulogic_vector(7 downto 0);
+
+    -- LCD 16x2 (HD44780). LCD_DATA e bidirecional na placa, mas so escrevemos
+    -- (RW fixo em 0), entao e acionado como saida. Ver sw/.../lcd.c.
+    lcd_data_o : out std_ulogic_vector(7 downto 0);
+    lcd_rs_o   : out std_ulogic;
+    lcd_rw_o   : out std_ulogic;
+    lcd_en_o   : out std_ulogic;
+    lcd_on_o   : out std_ulogic;
+    lcd_blon_o : out std_ulogic;
     ledr_o : out std_ulogic_vector(7 downto 0);
 
     -- SDRAM (2x IS42S16320D em paralelo, 32 bits combinados) --
@@ -142,7 +151,7 @@ begin
     IMEM_SIZE         => IMEM_SIZE,
     DMEM_EN           => true,
     DMEM_SIZE         => DMEM_SIZE,
-    IO_GPIO_NUM       => 8,
+    IO_GPIO_NUM       => 32,     -- 8 LEDs + 8 dados do LCD + RS + EN
     IO_CLINT_EN       => true,
     IO_UART0_EN       => true,
     IO_UART0_RX_FIFO  => 64,      -- absorve rajadas do upload do bootloader (padrao de 1 byte causa overflow)
@@ -261,6 +270,16 @@ begin
   -- LEDG[7:0]: 8 LSBs do GPIO de proposito geral do NEORV32 (uso livre do firmware)
   -- LEDR[0]: heartbeat de reset liberado | LEDR[1]: acelerador ocupado
   ledg_o <= con_gpio_out(7 downto 0);
+
+  -- LCD: dados em gpio[15:8], RS em gpio[16], EN em gpio[17]. RW fixo em 0
+  -- (nunca lemos o busy flag; o driver usa os tempos do datasheet), e
+  -- alimentacao/backlight sempre ligados.
+  lcd_data_o <= con_gpio_out(15 downto 8);
+  lcd_rs_o   <= con_gpio_out(16);
+  lcd_en_o   <= con_gpio_out(17);
+  lcd_rw_o   <= '0';
+  lcd_on_o   <= '1';
+  lcd_blon_o <= '1';
   ledr_o(0) <= rstn_sync;
   ledr_o(1) <= accel_irq;
   ledr_o(2) <= sdram_pll_locked; -- diagnostico: PLL do DRAM_CLK travou?

@@ -112,7 +112,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", required=True, help="porta serial, ex.: /dev/ttyUSB1")
     ap.add_argument("--baud", type=int, default=19200)
-    ap.add_argument("--weights", required=True, help="caminho para weights.bin")
+    ap.add_argument("--weights", required=False, default=None,
+                    help="caminho para weights.bin (omita para reusar os ja carregados na placa)")
     ap.add_argument("--image", help="arquivo binario com 784 bytes INT8 (28x28, HWC)")
     ap.add_argument("--mnist-index", type=int, help="indice no conjunto de teste MNIST (usa tensorflow_datasets)")
     args = ap.parse_args()
@@ -120,8 +121,10 @@ def main():
     if not args.image and args.mnist_index is None:
         sys.exit("[ERRO] especifique --image ou --mnist-index")
 
-    with open(args.weights, "rb") as f:
-        weights = f.read()
+    weights = None
+    if args.weights:
+        with open(args.weights, "rb") as f:
+            weights = f.read()
 
     if args.image:
         with open(args.image, "rb") as f:
@@ -136,7 +139,10 @@ def main():
     ser = serial.Serial(args.port, args.baud, timeout=300)
 
     print("[*] enviando pesos...")
-    send_blob(ser, 'W', weights)
+    if weights is None:
+        print("[*] pesos NAO enviados (--weights omitido): reusando os ja na placa")
+    else:
+        send_blob(ser, 'W', weights)
 
     print("[*] enviando imagem...")
     send_blob(ser, 'I', image)

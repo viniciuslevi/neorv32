@@ -242,9 +242,7 @@ void bench_sw_vs_hw(void) {
         for (int m = 0; m < 8; m++) neorv32_uart0_printf(" %i", (int)C_hw[m*8]);
         neorv32_uart0_printf("\n");
     }
-    if (cyc_hw > 0) {
-        // printf minimo do NEORV32 nao suporta largura (%02u): imprime em centesimos
-        neorv32_uart0_printf("Speedup HW/SW: %u.%u x (centesimos)\n",
-                              cyc_sw / cyc_hw, (uint32_t)(((uint64_t)(cyc_sw % cyc_hw) * 100u) / cyc_hw));
-    }
+    // O speedup fica a cargo do host: a divisao de 64 bits aqui nao acrescenta
+    // informacao, e o printf minimo do NEORV32 nao formata casas decimais.
+    neorv32_uart0_printf("(speedup = SW/HW = %u/%u)\n", cyc_sw, cyc_hw);
 }
