@@ -125,7 +125,8 @@ begin
     locked => sdram_pll_locked
   );
 
-  -- DRAM_CLK vem do PLL (defasagem de -2 ns), nao de um inversor combinacional.
+  -- DRAM_CLK vem do PLL (defasagem de -10000 ps = 180 graus a 50 MHz, validada em
+  -- hardware; 0 ps desloca todo acesso em uma palavra), nao de um inversor combinacional.
   -- O inversor puro (not clk_i) deixava a fase real no pino a merce do atraso de
   -- roteamento generico do FPGA, sem rede de clock dedicada -- justamente a
   -- condicao que produz captura marginal nas linhas de dado.

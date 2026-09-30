@@ -80,10 +80,14 @@ quartus_sh --flow compile neorv32_mnist_accel
 #    Resete o processador antes de rodar o upload.
 
 # 5. No PC, enviar pesos + imagem e rodar a inferência
-python3 tools/send_weights.py --port /dev/ttyUSB1 \
-    --weights ~/Documentos/tcc/ia_models/outputs/weights.bin \
-    --mnist-index 0
+#    A aplicação escuta a 115200 (o bootloader continua a 19200).
+python3 tools/send_weights.py --port /dev/ttyUSB1 --baud 115200 \
+    --weights caminho/para/weights.bin \
+    --image caminho/para/imagem.bin
+#    Próximas imagens: KEY1 na placa, depois só --image (os pesos ficam na SDRAM).
 ```
+
+Passo a passo completo, com armadilhas: `rtl/core/docs/Guia de Execucao.md`.
 
 ## O que está validado e o que não está
 
@@ -376,22 +380,24 @@ so devolve numeros errados com cara de certos.
 
 ## Limitações conhecidas (documentar no TCC, Cap. 3.11)
 
-- **Classe prevista incorreta**: rodando a imagem #0 do conjunto de teste MNIST
-  (rótulo real 2), o pipeline previu classe 8. Os logits finais mostram dois valores
-  empatados no máximo representável de int8 (127) — sinal de saturação/quantização
-  possivelmente incorreta em algum estágio de `inference.c`, ou resíduo de corrupção
-  de dados em algum acesso à SDRAM que o retry de access fault ainda não cobre.
-  Investigação pendente.
-- **Divergência SW vs HW no benchmark final**: o benchmark de comparação (matmul
-  8×8×8) reportou "64 elementos divergentes" — ou seja, a versão software e a do
-  acelerador não bateram em NENHUM elemento do teste, apesar do acelerador já ter
-  sido validado isoladamente (`test_systolic_accel`: ALL TESTS PASSED). Suspeita-se
-  de um bug na camada de mais alto nível (`accel_driver.c`: padding de borda ou
-  correção de zero-point), não no core do acelerador em si. Investigação pendente.
-- Bug cosmético: a string de formato `"Speedup HW/SW: %u.%02u x"` (ou similar) em
-  `main.c` usa um especificador de largura (`%02u`) que o printf minimalista do
-  NEORV32 não suporta — imprime o texto literal em vez do valor (mesma limitação já
-  vista em `test_systolic_accel/main.c` com `%2d`).
+Resolvidos e fora desta lista: classe prevista incorreta, divergência SW×HW no
+benchmark (ambos pelas correções das seções acima) e o `%02u` na linha de speedup.
+Relato completo em `rtl/core/docs/Diario de Bring-up.md`.
+
+- **Access faults transitórios na SDRAM**: ~14 700 por inferência, todos
+  recuperados pelo retry de `sdram.c`. A causa no controlador não foi isolada, e
+  os ciclos gastos em retry entram nos tempos por camada.
+- **Divisão de 64 bits trava o firmware**: `__udivdi3` na linha de speedup parava a
+  execução no meio da impressão. A conta foi reescrita em 32 bits; o mecanismo do
+  travamento não foi identificado.
+- **Reinicializações espontâneas**: a placa reiniciou sozinha pelo menos duas vezes
+  no laço de espera. Não investigado.
+- **Parâmetros do IS42S16320D no SDC** preenchidos de memória, pendentes de
+  conferência na folha de dados.
+- **Quantização por canal fora do `main`**: o firmware usa uma escala de peso por
+  camada, coerente com o `build_mnist_int8.py`. Para voltar ao pipeline TFLite
+  (`export_weights.py`, quantização por canal), reaplicar o commit `9f77c8c3` do
+  branch `backup/main-per-channel-quantization`.
 - Controlador SDRAM usa política *close-page* (ACTIVE→READ/WRITE→PRECHARGE a cada
   acesso) — simples e correta, mas não otimizada para throughput. Otimização para
   *open-page* fica como trabalho futuro.
