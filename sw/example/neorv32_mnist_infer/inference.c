@@ -249,7 +249,12 @@ void bench_sw_vs_hw(void) {
         for (int m = 0; m < 8; m++) neorv32_uart0_printf(" %i", (int)C_hw[m*8]);
         neorv32_uart0_printf("\n");
     }
-    // O speedup fica a cargo do host: a divisao de 64 bits aqui nao acrescenta
-    // informacao, e o printf minimo do NEORV32 nao formata casas decimais.
-    neorv32_uart0_printf("(speedup = SW/HW = %u/%u)\n", cyc_sw, cyc_hw);
+    // Speedup em 32 bits. A versao anterior usava (uint64_t) no numerador, o que
+    // forcava divisao de 64 bits (__udivdi3) e travava o firmware no meio da
+    // impressao desta linha. O resto cabe folgado em 32 bits: o maximo de
+    // (cyc_sw % cyc_hw) * 100 fica na casa de 1,9 milhao para este benchmark.
+    uint32_t sp_int  = cyc_sw / cyc_hw;
+    uint32_t sp_frac = ((cyc_sw % cyc_hw) * 100u) / cyc_hw;
+    // o printf minimo do NEORV32 nao suporta largura (%02u): zero a esquerda na mao
+    neorv32_uart0_printf("Speedup HW/SW: %u.%s%u x\n", sp_int, (sp_frac < 10) ? "0" : "", sp_frac);
 }

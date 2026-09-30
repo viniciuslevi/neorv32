@@ -13,6 +13,14 @@
 #include "inference.h"
 #include "sdram_diag.h"
 #include "lcd.h"
+
+// Baud da APLICACAO. Independente do baud do bootloader (19200, fixo em
+// sw/bootloader/config.h e embutido no bitstream): o bootloader so transfere os
+// ~16 KB do firmware, enquanto os 422 KB de pesos passam por aqui. O protocolo
+// confirma a cada 64 bytes e o FIFO de RX tem 64 entradas, entao a vazao e
+// autolimitada -- subir o baud nao arrisca estouro.
+// Use: python tools/send_weights.py --baud 115200 ...
+#define APP_UART_BAUD 115200
 #include "model_meta.h"
 
 
@@ -29,7 +37,7 @@ static void wait_key1(void) {
 }
 
 int main(void) {
-    neorv32_uart0_setup(19200, 0);
+    neorv32_uart0_setup(APP_UART_BAUD, 0);
     neorv32_rte_setup(); // instala handlers de debug para excecoes/interrupcoes nao tratadas
     sdram_install_fault_retry_handler(); // retry automatico em access fault na SDRAM
     neorv32_uart0_printf("\n=== NEORV32 + Acelerador Sistolico - Inferencia MNIST (TCC Fase 3/4) ===\n");

@@ -49,3 +49,4 @@ riscof_work
 /rtl/core/simulation/
 /rtl/core/*.ipregen.rpt
 /rtl/core/*_assignment_defaults.qdf
+/rtl/core/*.qws

@@ -17,8 +17,10 @@ import sys
 import time
 
 BAUD = 19200
-# Some USB-serial adapters (e.g. CH340) corrupt/drop bytes under a single
-# continuous burst at low baud rates; send small throttled chunks instead.
+# Envio pausado: 16 bytes a cada 10ms (~1600 B/s), ABAIXO dos 1920 B/s que 19200
+# baud comporta. Testado: enviar em rajada continua falha mesmo com um adaptador
+# FTDI bom, entao a pausa nao e (so) por causa do CH340 -- o gargalo esta em
+# quanto o bootloader consegue absorver, nao no cabo. Nao remover sem testar.
 CHUNK = 16
 CHUNK_DELAY_S = 0.01
 
@@ -33,10 +35,15 @@ def upload(ser, data, baud=BAUD, log=sys.stdout):
     log.write("Uploading executable (%d bytes)... " % len(data))
     log.flush()
     ser.write(b" u")  # skip auto-boot (SPACE) and start upload ('u')
-    for i in range(0, len(data), CHUNK):
-        ser.write(data[i:i + CHUNK])
+    if CHUNK <= 0:
+        ser.write(data)
         ser.flush()
-        time.sleep(CHUNK_DELAY_S)
+    else:
+        for i in range(0, len(data), CHUNK):
+            ser.write(data[i:i + CHUNK])
+            ser.flush()
+            if CHUNK_DELAY_S:
+                time.sleep(CHUNK_DELAY_S)
 
     # wait for the bootloader response
     buf = b""
