@@ -35,10 +35,13 @@ uint32_t sdram_uart_recv_blob(uint32_t sdram_offset);
 // Envia magic byte 'R' (ready) e aguarda um comando de 1 byte do host:
 //   'W' -> recebe pesos (sdram_uart_recv_blob em SDRAM_OFF_WEIGHTS)
 //   'I' -> recebe uma imagem de entrada (sdram_uart_recv_blob em SDRAM_OFF_INPUT)
-//   'G' -> go: encerra o handshake e retorna
+//   'G' -> go: encerra o handshake e retorna (inferencia + espera de KEY1)
+//   'H' -> como 'G', mas sem esperar KEY1 (coleta em lote pelo host)
+//   'S' -> como 'H', e repete a inferencia so em software para comparar
+// Retorna o comando que encerrou o handshake ('G', 'H' ou 'S').
 // Usado por main.c para o fluxo interativo de carga (Fase 3, "Validar carga de
 // tile via UART").
-void sdram_uart_handshake_loop(void);
+char sdram_uart_handshake_loop(void);
 
 // Instala handlers que fazem retry automatico em Load/Store access fault na
 // SDRAM (ver sdram.c) em vez de deixar o RTE pular a instrucao que falhou.

@@ -45,6 +45,48 @@ static void build_im2col(const int8_t *in_hwc, uint32_t H, uint32_t W, uint32_t 
     }
 }
 
+// ---------------------------------------------------------------------------------
+// Referencia so em software para accel_matmul_i8: mesma semantica (C = A @ W com
+// correcao de zero-point, -zp_a * soma(W[:,n])) e mesmo layout, sem o acelerador.
+// A soma inteira e associativa, entao o resultado e bit a bit igual ao do caminho
+// por tiles 8x8. Ordem m, k, n: cada linha de W e lida em sequencia e acumulada
+// num vetor local, a forma direta de escrever esse laco na CPU.
+// ---------------------------------------------------------------------------------
+#define SW_MATMUL_MAX_N 128u // maior N do modelo (dense1)
+
+static void sw_matmul_i8(const int8_t *A, uint32_t M, uint32_t K,
+                         const int8_t *W, uint32_t N,
+                         int32_t zp_a,
+                         int32_t *C) {
+    int32_t acc[SW_MATMUL_MAX_N];
+    int32_t wcolsum[SW_MATMUL_MAX_N];
+    if (N > SW_MATMUL_MAX_N) {
+        neorv32_uart0_printf("[sw_matmul] N=%u excede %u\n", N, SW_MATMUL_MAX_N);
+        return;
+    }
+
+    for (uint32_t n = 0; n < N; n++) wcolsum[n] = 0;
+    for (uint32_t k = 0; k < K; k++) {
+        for (uint32_t n = 0; n < N; n++) wcolsum[n] += (int32_t)W[k * N + n];
+    }
+
+    for (uint32_t m = 0; m < M; m++) {
+        for (uint32_t n = 0; n < N; n++) acc[n] = 0;
+        for (uint32_t k = 0; k < K; k++) {
+            int32_t a = (int32_t)A[m * K + k];
+            const int8_t *wrow = W + k * N;
+            for (uint32_t n = 0; n < N; n++) acc[n] += a * (int32_t)wrow[n];
+        }
+        for (uint32_t n = 0; n < N; n++) C[m * N + n] = acc[n] - zp_a * wcolsum[n];
+    }
+}
+
+static void matmul_i8(int use_accel, const int8_t *A, uint32_t M, uint32_t K,
+                      const int8_t *W, uint32_t N, int32_t zp_a, int32_t *C) {
+    if (use_accel) accel_matmul_i8(A, M, K, W, N, zp_a, C);
+    else           sw_matmul_i8(A, M, K, W, N, zp_a, C);
+}
+
 static inline int8_t requantize(int32_t acc_plus_bias, float multiplier,
                                  int32_t out_zp, int relu) {
     float v = (float)acc_plus_bias * multiplier;
@@ -58,7 +100,7 @@ static inline int8_t requantize(int32_t acc_plus_bias, float multiplier,
 // Camada conv2d 3x3 "same"/stride1 via im2col + acelerador. input_hwc/output_hwc
 // tem layout (H*W) x C (canais contiguos por pixel), compativel diretamente com a
 // proxima camada (conv ou flatten) sem necessidade de transposicao.
-static void conv2d_layer(const model_layer_t *L, const int8_t *input_hwc, int8_t *output_hwc) {
+static void conv2d_layer(int use_accel, const model_layer_t *L, const int8_t *input_hwc, int8_t *output_hwc) {
     int8_t *im2col = (int8_t*)SDRAM_ADDR(SDRAM_OFF_IM2COL);
     build_im2col(input_hwc, L->in_h, L->in_w, L->in_c, (int8_t)L->in_zero_point, im2col);
 
@@ -67,7 +109,7 @@ static void conv2d_layer(const model_layer_t *L, const int8_t *input_hwc, int8_t
     const int32_t *bias = (const int32_t*)(SDRAM_BASE + SDRAM_OFF_WEIGHTS + L->b_offset);
     int32_t *acc = (int32_t*)SDRAM_ADDR(SDRAM_OFF_ACC);
 
-    accel_matmul_i8(im2col, M, L->k, Wt, L->n, L->in_zero_point, acc);
+    matmul_i8(use_accel, im2col, M, L->k, Wt, L->n, L->in_zero_point, acc);
 
     float mult = L->in_scale * L->w_scale / L->out_scale;
     for (uint32_t m = 0; m < M; m++) {
@@ -79,12 +121,12 @@ static void conv2d_layer(const model_layer_t *L, const int8_t *input_hwc, int8_t
 }
 
 // Camada fully-connected via acelerador (M=1: um unico vetor de entrada).
-static void dense_layer(const model_layer_t *L, const int8_t *input_vec, int8_t *output_vec) {
+static void dense_layer(int use_accel, const model_layer_t *L, const int8_t *input_vec, int8_t *output_vec) {
     const int8_t  *Wt   = (const int8_t*)(SDRAM_BASE + SDRAM_OFF_WEIGHTS + L->w_offset);
     const int32_t *bias = (const int32_t*)(SDRAM_BASE + SDRAM_OFF_WEIGHTS + L->b_offset);
     int32_t *acc = (int32_t*)SDRAM_ADDR(SDRAM_OFF_ACC);
 
-    accel_matmul_i8(input_vec, 1, L->k, Wt, L->n, L->in_zero_point, acc);
+    matmul_i8(use_accel, input_vec, 1, L->k, Wt, L->n, L->in_zero_point, acc);
 
     float mult = L->in_scale * L->w_scale / L->out_scale;
     for (uint32_t n = 0; n < L->n; n++) {
@@ -123,60 +165,65 @@ static int argmax_i8(const int8_t *v, int n) {
     return best;
 }
 
-int run_inference(void) {
+// Fecha a medicao de uma etapa: imprime e acumula no total. O formato da linha
+// "[bench] <etapa> : N ciclos" e lido pelo app desktop (board.py, RE_BENCH); o
+// caminho so em software usa "[bench-sw]", que esse parser ignora.
+static void bench_report(const char *tag, const char *stage, uint64_t t0, uint32_t *total) {
+    uint32_t dt = (uint32_t)(neorv32_cpu_get_cycle() - t0);
+    *total += dt;
+    neorv32_uart0_printf("%s %s: %u ciclos\n", tag, stage, dt);
+}
+
+int run_inference(int use_accel, int8_t *logits, uint32_t *total_cycles) {
     int8_t *buf_a = (int8_t*)SDRAM_ADDR(SDRAM_OFF_BUF_A);
     int8_t *buf_b = (int8_t*)SDRAM_ADDR(SDRAM_OFF_BUF_B);
     const int8_t *input = (const int8_t*)SDRAM_ADDR(SDRAM_OFF_INPUT);
+    const char *tag = use_accel ? "[bench]" : "[bench-sw]";
 
-    uint64_t t0, t1;
+    uint64_t t0;
+    *total_cycles = 0;
 
     t0 = neorv32_cpu_get_cycle();
     lcd_goto(1, 0); lcd_puts("camada: conv1  ");
-    conv2d_layer(&MODEL_LAYERS[LAYER_CONV1], input, buf_a); // -> 28x28x32
-    t1 = neorv32_cpu_get_cycle();
-    neorv32_uart0_printf("[bench] conv1  : %u ciclos\n", (uint32_t)(t1 - t0));
+    conv2d_layer(use_accel, &MODEL_LAYERS[LAYER_CONV1], input, buf_a); // -> 28x28x32
+    bench_report(tag, "conv1  ", t0, total_cycles);
 
     t0 = neorv32_cpu_get_cycle();
     lcd_goto(1, 0); lcd_puts("camada: pool1  ");
     maxpool2x2(buf_a, 28, 28, 32, buf_b); // -> 14x14x32
-    t1 = neorv32_cpu_get_cycle();
-    neorv32_uart0_printf("[bench] pool1  : %u ciclos\n", (uint32_t)(t1 - t0));
+    bench_report(tag, "pool1  ", t0, total_cycles);
 
     t0 = neorv32_cpu_get_cycle();
     lcd_goto(1, 0); lcd_puts("camada: conv2  ");
-    conv2d_layer(&MODEL_LAYERS[LAYER_CONV2], buf_b, buf_a); // -> 14x14x64
-    t1 = neorv32_cpu_get_cycle();
-    neorv32_uart0_printf("[bench] conv2  : %u ciclos\n", (uint32_t)(t1 - t0));
+    conv2d_layer(use_accel, &MODEL_LAYERS[LAYER_CONV2], buf_b, buf_a); // -> 14x14x64
+    bench_report(tag, "conv2  ", t0, total_cycles);
 
     t0 = neorv32_cpu_get_cycle();
     lcd_goto(1, 0); lcd_puts("camada: pool2  ");
     maxpool2x2(buf_a, 14, 14, 64, buf_b); // -> 7x7x64 (=3136, ja "achatado" em HWC)
-    t1 = neorv32_cpu_get_cycle();
-    neorv32_uart0_printf("[bench] pool2  : %u ciclos\n", (uint32_t)(t1 - t0));
+    bench_report(tag, "pool2  ", t0, total_cycles);
 
     t0 = neorv32_cpu_get_cycle();
     lcd_goto(1, 0); lcd_puts("camada: dense1 ");
-    dense_layer(&MODEL_LAYERS[LAYER_DENSE1], buf_b, buf_a); // -> 128
-    t1 = neorv32_cpu_get_cycle();
-    neorv32_uart0_printf("[bench] dense1 : %u ciclos\n", (uint32_t)(t1 - t0));
+    dense_layer(use_accel, &MODEL_LAYERS[LAYER_DENSE1], buf_b, buf_a); // -> 128
+    bench_report(tag, "dense1 ", t0, total_cycles);
 
     t0 = neorv32_cpu_get_cycle();
     lcd_goto(1, 0); lcd_puts("camada: dense2 ");
-    dense_layer(&MODEL_LAYERS[LAYER_DENSE2], buf_a, buf_b); // -> 10 (logits)
-    t1 = neorv32_cpu_get_cycle();
-    neorv32_uart0_printf("[bench] dense2 : %u ciclos\n", (uint32_t)(t1 - t0));
+    dense_layer(use_accel, &MODEL_LAYERS[LAYER_DENSE2], buf_a, buf_b); // -> 10 (logits)
+    bench_report(tag, "dense2 ", t0, total_cycles);
 
     // Copia os logits da SDRAM para a pilha ANTES de imprimir. Imprimir lendo
     // direto da SDRAM mistura duas coisas num mesmo laco (acesso a SDRAM e
     // UART): se travar, nao da para saber qual foi. Com a copia, o laco de
     // impressao nao toca a SDRAM.
-    int8_t logits[OUTPUT_CLASSES];
     for (int i = 0; i < OUTPUT_CLASSES; i++) logits[i] = buf_b[i];
-    neorv32_uart0_printf("[logits copiados da SDRAM ok]\n[logits] ");
+    neorv32_uart0_printf("[logits copiados da SDRAM ok]\n%s ", use_accel ? "[logits]" : "[logits-sw]");
     for (int i = 0; i < OUTPUT_CLASSES; i++) {
         neorv32_uart0_printf("%d ", logits[i]);
     }
     neorv32_uart0_printf("\n[faults ate aqui: %u]\n", (unsigned)sdram_get_fault_count());
+    neorv32_uart0_printf("[faults desistidos: %u]\n", (unsigned)sdram_get_fault_giveups());
 
     return argmax_i8(logits, OUTPUT_CLASSES);
 }

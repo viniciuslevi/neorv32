@@ -154,7 +154,7 @@ uint32_t sdram_uart_recv_blob(uint32_t sdram_offset) {
     return len;
 }
 
-void sdram_uart_handshake_loop(void) {
+char sdram_uart_handshake_loop(void) {
     while (1) {
         // re-send 'R' periodically instead of blocking on it once: a host
         // script that connects a moment late would otherwise miss the only
@@ -189,8 +189,8 @@ void sdram_uart_handshake_loop(void) {
             lcd_goto(0, 0); lcd_puts("Imagem recebida");
             lcd_goto(1, 0); lcd_puti((int32_t)n); lcd_puts(" bytes");
             neorv32_uart0_printf("\n[sdram] imagem recebida: %u bytes\n", n);
-        } else if (cmd == 'G') {
-            return;
+        } else if (cmd == 'G' || cmd == 'H' || cmd == 'S') {
+            return cmd;
         }
     }
 }

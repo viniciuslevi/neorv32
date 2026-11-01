@@ -10,7 +10,11 @@
 // imagem 28x28 INT8 previamente carregada em SDRAM_OFF_INPUT. Retorna a classe
 // prevista (0-9, argmax dos logits) e imprime, via UART0, o tempo (ciclos) gasto
 // em cada camada (Metodologia 3.9: latencia/throughput por camada).
-int run_inference(void);
+// use_accel = 1: produtos de matrizes no acelerador (linhas "[bench]", "[logits]");
+// use_accel = 0: os mesmos produtos so na CPU, com resultado bit a bit identico
+// (linhas "[bench-sw]", "[logits-sw]"). logits recebe os 10 logits INT8 e
+// total_cycles a soma dos ciclos das seis etapas.
+int run_inference(int use_accel, int8_t *logits, uint32_t *total_cycles);
 
 // Compara, para um matmul 8x8x8 representativo, o tempo (ciclos) do calculo via
 // acelerador sistolico contra uma implementacao MAC puramente em software na CPU

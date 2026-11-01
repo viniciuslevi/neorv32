@@ -36,6 +36,35 @@ static void wait_key1(void) {
     neorv32_aux_delay_ms(clk, 20);
 }
 
+// Comando 'S': repete a inferencia da mesma imagem so na CPU e compara com a do
+// acelerador. Mede o ganho sobre a rede inteira (o bench_sw_vs_hw mede um unico
+// tile 8x8x8) e confirma que os dois caminhos dao os mesmos logits.
+static void compare_sw_inference(const int8_t *logits_hw, uint32_t cyc_hw) {
+    int8_t logits_sw[OUTPUT_CLASSES];
+    uint32_t cyc_sw;
+
+    neorv32_uart0_printf("\nExecutando inferencia so em software (referencia)...\n");
+    lcd_clear();
+    lcd_goto(0, 0); lcd_puts("Inferindo (SW)");
+    int classe_sw = run_inference(0, logits_sw, &cyc_sw);
+
+    int iguais = 1;
+    for (int i = 0; i < OUTPUT_CLASSES; i++) {
+        if (logits_sw[i] != logits_hw[i]) iguais = 0;
+    }
+    neorv32_uart0_printf("[total-sw] %u ciclos\n", cyc_sw);
+    neorv32_uart0_printf("[sw-vs-hw] classe sw: %d | logits identicos: %s\n",
+                         classe_sw, iguais ? "SIM" : "NAO");
+    // Divisao so em 32 bits (ver bench_sw_vs_hw: __udivdi3 travava o firmware).
+    // (cyc_sw % cyc_hw) * 100 estouraria 32 bits com totais na casa de 10^8,
+    // por isso a fracao divide pelo centesimo de cyc_hw.
+    uint32_t sp_int  = cyc_sw / cyc_hw;
+    uint32_t sp_frac = (cyc_hw >= 100u) ? (cyc_sw % cyc_hw) / (cyc_hw / 100u) : 0u;
+    if (sp_frac > 99u) sp_frac = 99u;
+    neorv32_uart0_printf("[speedup] inferencia completa HW/SW: %u.%s%u x\n",
+                         sp_int, (sp_frac < 10) ? "0" : "", sp_frac);
+}
+
 int main(void) {
     neorv32_uart0_setup(APP_UART_BAUD, 0);
     neorv32_rte_setup(); // instala handlers de debug para excecoes/interrupcoes nao tratadas
@@ -60,24 +89,37 @@ int main(void) {
         lcd_goto(0, 0); lcd_puts("Aguardando");
         lcd_goto(1, 0); lcd_puts("imagem via UART");
         neorv32_uart0_printf("\nAguardando handshake UART (host: tools/send_weights.py)...\n");
-        sdram_uart_handshake_loop();
+        char cmd = sdram_uart_handshake_loop();
 
         lcd_clear();
         lcd_goto(0, 0); lcd_puts("Inferindo...");
 
         neorv32_uart0_printf("\nExecutando inferencia...\n");
-        int classe = run_inference();
+        int8_t logits[OUTPUT_CLASSES];
+        uint32_t cyc_hw;
+        int classe = run_inference(1, logits, &cyc_hw);
+        neorv32_uart0_printf("[total] %u ciclos\n", cyc_hw);
         neorv32_uart0_printf("\n>>> Classe prevista: %d <<<\n", classe);
+
+        if (cmd == 'S') {
+            compare_sw_inference(logits, cyc_hw);
+        }
 
         lcd_clear();
         lcd_goto(0, 0); lcd_puts("Classe: ");
         lcd_puti(classe);
-        lcd_goto(1, 0); lcd_puts("KEY1 = proxima");
 
-        // Segura o resultado no display ate o clique: sem isso o laco voltava
-        // ao handshake e limpava o LCD antes de dar tempo de ler.
-        neorv32_uart0_printf("(pressione KEY1 na placa para a proxima imagem)\n");
-        wait_key1();
+        // 'H' e 'S' vem de coleta automatica pelo host: volta direto ao
+        // handshake. 'G' (uso interativo) segura o resultado no display ate o
+        // clique: sem isso o laco voltava ao handshake e limpava o LCD antes
+        // de dar tempo de ler.
+        if (cmd == 'G') {
+            lcd_goto(1, 0); lcd_puts("KEY1 = proxima");
+            neorv32_uart0_printf("(pressione KEY1 na placa para a proxima imagem)\n");
+            wait_key1();
+        } else {
+            neorv32_uart0_printf("[fim]\n");
+        }
     }
 
     return 0;
