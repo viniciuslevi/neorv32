@@ -48,5 +48,7 @@ riscof_work
 /rtl/core/output_files_mnist_accel/
 /rtl/core/simulation/
 /rtl/core/*.ipregen.rpt
+/rtl/core/.qsys_edit/
+/rtl/core/output_*/
 /rtl/core/*_assignment_defaults.qdf
 /rtl/core/*.qws
