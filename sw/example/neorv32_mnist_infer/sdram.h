@@ -48,4 +48,9 @@ void sdram_install_fault_retry_handler(void);
 // Numero total de access faults retentados desde o boot (para diagnostico).
 uint32_t sdram_get_fault_count(void);
 
+// Quantas vezes o retry desistiu (mais de SDRAM_FAULT_MAX_CONSECUTIVE_RETRIES
+// falhas seguidas no mesmo acesso) desde o boot. Cada desistencia perde o dado
+// daquele acesso: qualquer valor diferente de zero invalida o resultado.
+uint32_t sdram_get_fault_giveups(void);
+
 #endif // SDRAM_H

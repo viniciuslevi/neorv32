@@ -20,23 +20,35 @@
 #define SDRAM_FAULT_MAX_CONSECUTIVE_RETRIES 64  // 100000 nao distinguia transitorio de quebrado
 
 static volatile uint32_t sdram_fault_last_mepc = 0;
+static volatile uint32_t sdram_fault_last_addr = 0;
 static volatile uint32_t sdram_fault_retry_count = 0;
 static volatile uint32_t sdram_fault_total = 0;
+static volatile uint32_t sdram_fault_giveups = 0;
 
 static void sdram_access_fault_retry_handler(void) {
     uint32_t mepc = neorv32_cpu_csr_read(CSR_MEPC);
+    uint32_t addr = neorv32_cpu_csr_read(CSR_MTVAL); // endereco do acesso que falhou
 
-    if (mepc == sdram_fault_last_mepc) {
+    // "Consecutiva" = mesma instrucao E mesmo endereco, ou seja, a repeticao do
+    // proprio retry. So a instrucao nao basta: num laco quente a mesma load roda
+    // milhoes de vezes, e falhas isoladas em iteracoes diferentes somavam ate o
+    // limite -- a partir dai toda falha naquela instrucao era pulada e o
+    // registrador ficava com valor velho (corrompeu a inferencia so em software).
+    if (mepc == sdram_fault_last_mepc && addr == sdram_fault_last_addr) {
         sdram_fault_retry_count++;
     } else {
         sdram_fault_last_mepc = mepc;
+        sdram_fault_last_addr = addr;
         sdram_fault_retry_count = 1;
     }
     sdram_fault_total++;
 
     if (sdram_fault_retry_count > SDRAM_FAULT_MAX_CONSECUTIVE_RETRIES) {
         // falha persistente de verdade (nao transitoria): desiste e deixa o
-        // framework avancar o MEPC normalmente, para nao travar para sempre
+        // framework avancar o MEPC normalmente, para nao travar para sempre.
+        // O dado se perde: contado a parte para nao passar despercebido.
+        sdram_fault_giveups++;
+        sdram_fault_retry_count = 0;
         return;
     }
 
@@ -54,6 +66,10 @@ void sdram_install_fault_retry_handler(void) {
 
 uint32_t sdram_get_fault_count(void) {
     return sdram_fault_total;
+}
+
+uint32_t sdram_get_fault_giveups(void) {
+    return sdram_fault_giveups;
 }
 
 // Le um byte com timeout limitado (-1 se nada chegar a tempo). Alguns
