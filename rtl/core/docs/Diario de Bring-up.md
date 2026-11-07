@@ -33,7 +33,7 @@ sessão 1 concluiu errado, e por quê.
 | Timing da interface FPGA↔SDRAM não analisado | ✅ Resolvido (SDC completo) | 9.3 |
 | Divergência SW×HW no benchmark (64/64) | ✅ Resolvido: dois defeitos na interface do acelerador | 7, 9.4 |
 | Classe prevista errada / não determinística | ✅ Resolvido: logits batem bit a bit com a referência | 6, 9.5 |
-| Access faults transitórios na SDRAM | ⚠ Em aberto, mitigado por retry | 4.3, 10 |
+| Access faults transitórios na SDRAM | 🔶 Causa achada em simulação (sessão 3); falta confirmar na placa | 4.3, 12.1 |
 | Travamento com divisão de 64 bits no `printf` | ⚠ Contornado, mecanismo desconhecido | 10 |
 | Reinicializações espontâneas da placa | ⚠ Em aberto, não investigado | 10 |
 
@@ -227,6 +227,10 @@ mesma instrução executar de novo.
 > nas medições por camada. O limite de retries consecutivos caiu de 100 000 para
 > 64: cem mil tentativas seguidas não distinguem uma falha transitória de uma
 > permanente, que era o propósito do limite.
+
+> **Sessão 3.** Causa encontrada em simulação (12.1): o controlador só registrava um
+> pedido em `S_IDLE`, e o `stb` do XBUS dura um ciclo. Um `stb` que chegasse durante
+> um AUTO REFRESH se perdia. Falta confirmar na placa que os faults zeraram.
 
 ### 4.4 Resultados variando entre gravações
 O mesmo bitstream às vezes funcionava e às vezes não, só reprogramando a placa. A
@@ -492,8 +496,8 @@ específico. O `model_meta.h` do `main` atual contém os parâmetros do Fashion-
 
 ## 10. Questões em aberto
 
-- **Access faults transitórios**: ~14 700 por inferência, todos recuperados pelo
-  retry (4.3). A causa no controlador não foi isolada.
+- **Access faults transitórios**: causa encontrada e corrigida em simulação (12.1).
+  Falta rodar a inferência na placa e ver `[faults ate aqui: 0]`.
 - **Travamento com divisão de 64 bits**: a linha de speedup do benchmark usava
   `(uint32_t)(((uint64_t)(cyc_sw % cyc_hw) * 100u) / cyc_hw)`. O cast para 64 bits
   força uma chamada a `__udivdi3` (RISC-V não divide 64 bits em hardware), e a
@@ -509,8 +513,6 @@ específico. O `model_meta.h` do `main` atual contém os parâmetros do Fashion-
   afetam o funcionamento atual, porque a fase foi validada em hardware, mas afetam a
   confiabilidade do relatório de timing em recompilações futuras.
 - **Quantização por canal fora do `main`**: ver seção 6.
-
----
 
 ## 11. Retrospectiva: o que a sessão 1 concluiu errado
 
@@ -535,6 +537,102 @@ não *onde*; o relatório de timing cobria só a lógica interna; e o `test_syst
 passava por coincidência de temporização. Os testes da sessão 2 que informavam
 *como* a falha acontecia resolveram em minutos o que os binários não resolveram em
 horas.
+
+---
+
+## 12. Sessão 3: DMA e array 16×16 (só simulação, sem a placa)
+
+### 12.1 Access faults: o `stb` de um ciclo
+O XBUS do NEORV32 é Wishbone *pipelined*: `xbus_stb_o` fica alto por **um ciclo** e
+`xbus_cyc_o` segue alto até o `ack` (`neorv32_xbus.vhd`). O controlador SDRAM só
+registrava o pedido se estivesse em `S_IDLE` nesse ciclo. Um `stb` que chegasse
+durante um AUTO REFRESH (cerca de 5 ciclos fora de `S_IDLE`) ou ainda na
+inicialização se perdia: ninguém respondia, e o `XBUS_TIMEOUT` virava access fault.
+
+Isso era pior que 5 ciclos em 385. O refresh pendente só é atendido quando a FSM
+volta a `S_IDLE`, que é exatamente quando o mestre manda o próximo `stb`. Por isso
+quase todo refresh que vencia durante um acesso matava o acesso seguinte.
+
+As testbenches nunca viam o problema porque o mestre delas segurava `stb` até o
+`ack` (Wishbone clássico), a mesma armadilha do bug 9.1. A
+`neorv32_sdram_controller_tb` ganhou uma fase com mestre igual ao XBUS: `stb` de um
+ciclo, endereço trocado por lixo logo depois e timeout de 64 ciclos.
+
+| Controlador | Acessos sem `ack`, de 400 |
+| --- | --- |
+| Antes (só aceita em `S_IDLE`) | 57 |
+| Depois (aceita em qualquer estado sem pedido pendente) | 0 |
+
+A correção registra o pedido em qualquer estado, desde que não haja outro em
+andamento (`req_pending = '0'`), e a FSM o atende quando voltar a `S_IDLE`. Um
+mestre clássico, que segura `stb`, não duplica o pedido, porque nada é aceito com
+`req_pending = '1'`. Isso também era pré-requisito do DMA: ele não tem o retry que
+salvava a CPU (4.3), e um access fault aborta o descritor inteiro.
+
+Na simulação do SoC com o firmware de teste (12.3), o controlador antigo produziu
+505 access faults na CPU, todos recuperados pelo retry, e **222 erros de
+barramento no DMA**: todos os resultados calculados por DMA saíram errados. Com a
+correção, 0 e 0.
+
+### 12.2 Proposta A: DMA do NEORV32, cache de instruções e `wfi`
+O DMA do NEORV32 fica entre a CPU e o switch de barramento, então alcança a SDRAM
+e o acelerador sem RTL novo. No `neorv32_de2115_mnist_top`: `IO_DMA_EN` (fila de 16
+entradas, 5 descritores), `ICACHE_EN` (8 blocos de 64 B) e dois generics,
+`BOOT_MODE_SELECT` (a simulação inicia direto da IMEM) e `ACCEL_ARRAY_SIZE`.
+
+No driver (`accel_driver.c`):
+- **Tiles contíguos.** `accel_wpack` grava cada tile de pesos em T·T bytes
+  seguidos, com zero fora de K×N e a soma das colunas pronta. `accel_apack` (ou o
+  im2col, direto) faz o mesmo com as ativações. Cada tile vira um descritor.
+- **`wfi` em vez de polling.** A CPU dorme até a IRQ do DMA. Ela acorda mesmo com
+  `mstatus.MIE = 0`, sem passar por handler. Fazer polling de `DMA_CTRL` atrasaria o
+  próprio DMA, porque a CPU tem prioridade fixa no switch.
+- **Sobreposição.** O array copia os pesos no ciclo seguinte ao start. Por isso o
+  DMA carrega os pesos do próximo tile durante o cálculo, e as ativações do
+  próximo enquanto a CPU lê RESULT.
+- **Medição pelo `mtime`.** O `mcycle` para enquanto a CPU dorme (`cnt_event_cy = 0`
+  em `S_SLEEP`): medir com `neorv32_cpu_get_cycle()` daria um tempo menor que o real.
+
+O wrapper ganhou o registrador INFO (`0x00C`, tamanho do array), e a IRQ passou a
+subir no fim da operação, não a cada linha (o mesmo engano que o polling já tinha
+corrigido em 9.4).
+
+### 12.3 Resultados na simulação do SoC
+`sim/run_soc_sim.sh` simula o top-level da placa inteiro no GHDL: NEORV32, gateway,
+controlador SDRAM com modelo comportamental e acelerador, com o firmware
+`sw/example/accel_dma_test` gravado na IMEM. Ele faz o mesmo cálculo pelos três
+caminhos e confere contra uma referência em software. Todos os resultados batem.
+
+| Caminho (ciclos) | Matmul 30×70×20, 8×8 | Matmul, 16×16 | Matvec 1×136×20, 8×8 | Matvec, 16×16 |
+| --- | --- | --- | --- | --- |
+| Só software | 2 702 498 | 2 618 634 | — | — |
+| Acelerador, CPU move os dados | 1 335 470 | 973 711 | 561 813 | 763 839 |
+| Acelerador, DMA | 428 240 | 284 674 | 53 269 | 45 091 |
+| Acelerador, DMA com sobreposição | 399 134 | 266 546 | 49 410 | 36 965 |
+
+- O DMA dá 3,3× no matmul (8×8) sobre o caminho em que a CPU move os dados.
+- A sobreposição rende só 7%: o barramento compartilhado é o limite, como a
+  proposta previa (cada byte cruza o barramento duas vezes).
+- No matvec, o caminho antigo monta tiles inteiros para um vetor de uma linha, e
+  o DMA copia só a linha 0 de ACT: 11,4× em 8×8.
+- O 16×16 corta mais 1,5× o matmul com DMA. No caminho antigo, o matvec piora em
+  16×16, porque a CPU monta tiles 4 vezes maiores para usar uma linha só.
+
+### 12.4 Recursos e timing (Quartus 25.1, Cyclone IV EP4CE115)
+
+| Configuração | LEs | Registradores | Multiplicadores 9 bits | Fmax (slow 85 °C) |
+| --- | --- | --- | --- | --- |
+| 8×8 + DMA + ICACHE | 11 638 (10%) | 8 523 | 64 de 532 | 62,7 MHz |
+| 16×16 + DMA + ICACHE | 34 241 (30%) | 27 845 | 256 de 532 | 58,3 MHz |
+
+As duas fecham timing a 50 MHz. Para gerar o bitstream 16×16:
+`set_parameter -name ACCEL_ARRAY_SIZE 16` no `.qsf` e o firmware com `make TILE=16`.
+O firmware recusa um bitstream de outro tamanho (registrador INFO).
+
+Durante essa síntese apareceu um defeito à parte: o `.qsf` reescrito pelo Quartus
+passou a listar `neorv32_cfs.vhd`, que declara a mesma entidade `neorv32_cfs` que
+`neorv32_systolic_accelator.vhd`. Com as duas, a síntese para no erro 10430. A
+linha foi removida, voltando ao conjunto de arquivos de antes.
 
 ---
 

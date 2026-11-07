@@ -1,8 +1,8 @@
 -- ================================================================================ --
 -- NEORV32 SoC - Top-level integrado DE2-115 (Fase 3/4 do TCC)                      --
 -- -------------------------------------------------------------------------------- --
--- Integra: NEORV32 (RV32IMC) + XBUS -> gateway Wishbone -> {SDRAM, acelerador       --
--- sistolico 8x8 INT8}. Ver Metodologia 3.5 (hierarquia de modulos) e 3.10 (Fase 3:  --
+-- Integra: NEORV32 (RV32IMC, DMA, cache de instrucoes) + XBUS -> gateway Wishbone  --
+-- -> {SDRAM, acelerador sistolico TxT INT8, T = ACCEL_ARRAY_SIZE}. Ver Metodologia 3.5 (hierarquia de modulos) e 3.10 (Fase 3:  --
 -- "Integracao SDRAM + NEORV32").                                                   --
 -- -------------------------------------------------------------------------------- --
 -- Mapa de enderecos (barramento externo XBUS do NEORV32):                          --
@@ -29,9 +29,13 @@ use neorv32.neorv32_package.all;
 
 entity neorv32_de2115_mnist_top is
   generic (
-    CLOCK_FREQUENCY : natural := 50_000_000; -- clk_i, direto do oscilador da placa
-    IMEM_SIZE       : natural := 32 * 1024;  -- 32 KB ROM interna (.text/.rodata)
-    DMEM_SIZE       : natural := 16 * 1024   -- 16 KB RAM interna (.data/.bss/pilha)
+    CLOCK_FREQUENCY  : natural := 50_000_000; -- clk_i, direto do oscilador da placa
+    IMEM_SIZE        : natural := 32 * 1024;  -- 32 KB ROM interna (.text/.rodata)
+    DMEM_SIZE        : natural := 16 * 1024;  -- 16 KB RAM interna (.data/.bss/pilha)
+    -- 0 = bootloader (placa: firmware via UART0); 2 = imagem ja gravada na IMEM
+    -- (simulacao, sim/neorv32_de2115_soc_tb.vhd, sem upload pela UART)
+    BOOT_MODE_SELECT : natural range 0 to 2 := 0;
+    ACCEL_ARRAY_SIZE : natural := 8           -- array sistolico ACCEL_ARRAY_SIZE^2 (8 ou 16)
   );
   port (
     -- Clock e reset --
@@ -145,10 +149,16 @@ begin
   neorv32_top_inst: neorv32_top
   generic map (
     CLOCK_FREQUENCY   => CLOCK_FREQUENCY,
-    BOOT_MODE_SELECT  => 0,      -- boot via bootloader interno (upload de firmware via UART0)
+    BOOT_MODE_SELECT  => BOOT_MODE_SELECT, -- placa: 0, boot via bootloader (upload pela UART0)
     RISCV_ISA_C       => true,
     RISCV_ISA_M       => true,
     RISCV_ISA_Zicntr  => true,   -- contadores de ciclo/tempo (usados no benchmark da Fase 4)
+    -- Cache de instrucoes: a CPU tem prioridade fixa sobre o DMA no switch de
+    -- barramento, e sem cache cada busca de instrucao (IMEM) ocupa esse switch.
+    -- Com a cache, o DMA consegue andar enquanto a CPU executa codigo (Proposta
+    -- A, "Proposta 16x16 + DMA"). 8 blocos de 64 B = 512 B.
+    ICACHE_EN         => true,
+    ICACHE_NUM_BLOCKS => 8,
     IMEM_EN           => true,
     IMEM_SIZE         => IMEM_SIZE,
     DMEM_EN           => true,
@@ -157,6 +167,11 @@ begin
     IO_CLINT_EN       => true,
     IO_UART0_EN       => true,
     IO_UART0_RX_FIFO  => 64,      -- absorve rajadas do upload do bootloader (padrao de 1 byte causa overflow)
+    -- DMA do NEORV32 entre a CPU e o switch de barramento: alcanca o XBUS (SDRAM
+    -- e acelerador) sem RTL novo. Um descritor ocupa 3 entradas da fila; 16
+    -- entradas cabem 5 descritores (o driver enfileira no maximo 2 por vez).
+    IO_DMA_EN         => true,
+    IO_DMA_DSC_FIFO   => 16,
     XBUS_EN           => true,   -- habilita barramento externo (SDRAM + acelerador)
     XBUS_TIMEOUT      => 2048,
     XBUS_REGSTAGE_EN  => false
@@ -250,14 +265,18 @@ begin
     dram_we_n_o  => dram_we_n_o
   );
 
-  -- Acelerador sistolico 8x8 INT8 (Wishbone) -------------------------------------------
+  -- Acelerador sistolico TxT INT8 (Wishbone), T = ACCEL_ARRAY_SIZE ----------------------
   accel_inst: entity work.neorv32_systolic_wb_accelerator
+  generic map (
+    ARRAY_SIZE => ACCEL_ARRAY_SIZE
+  )
   port map (
     clk_i    => clk_i,
     rstn_i   => rstn_sync,
-    irq_o    => accel_irq,  -- nao conectado a um controlador de interrupcao externo
-                             -- (firmware da Fase 3/4 usa polling de STATUS; IRQ fica
-                             -- disponivel para trabalho futuro via PLIC/FIRQ)
+    irq_o    => accel_irq,  -- nao conectado a um controlador de interrupcao externo:
+                             -- o calculo de um tile dura poucas centenas de ciclos e o
+                             -- firmware faz polling de STATUS; quem acorda a CPU do
+                             -- wfi e a IRQ do DMA (FIRQ interna do neorv32_top)
     wb_adr_i => accel_adr,
     wb_dat_i => accel_dat_o,
     wb_dat_o => accel_dat_i,

@@ -159,7 +159,6 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to lcd_blon_o
 
 set_global_assignment -name SOURCE_FILE sdram_clk_pll_core.cmp
 set_global_assignment -name SDC_FILE neorv32_mnist_accel.sdc
-set_global_assignment -name VHDL_FILE neorv32_cfs.vhd
 set_global_assignment -name VHDL_FILE neorv32_xbus_wb_gateway.vhd
 set_global_assignment -name VHDL_FILE neorv32_xbus.vhd
 set_global_assignment -name VHDL_FILE neorv32_wdt.vhd

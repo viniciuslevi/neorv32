@@ -116,6 +116,10 @@ def main():
                     help="caminho para weights.bin (omita para reusar os ja carregados na placa)")
     ap.add_argument("--image", help="arquivo binario com 784 bytes INT8 (28x28, HWC)")
     ap.add_argument("--mnist-index", type=int, help="indice no conjunto de teste MNIST (usa tensorflow_datasets)")
+    ap.add_argument("--cmd", choices=["G", "H", "S", "C"], default="G",
+                    help="comando que dispara a inferencia: G = espera KEY1 (padrao), "
+                         "H = sem esperar, S = compara com a CPU sozinha, "
+                         "C = compara com o acelerador sem DMA (a CPU movendo os dados)")
     args = ap.parse_args()
 
     if not args.image and args.mnist_index is None:
@@ -149,8 +153,8 @@ def main():
 
     if not recv_ready(ser):
         sys.exit("[ERRO] timeout aguardando 'R' antes do go")
-    ser.write(b'G')
-    print("[*] 'go' enviado -- lendo saida da inferencia (Ctrl+C para sair)...\n")
+    ser.write(args.cmd.encode())
+    print(f"[*] '{args.cmd}' enviado -- lendo saida da inferencia (Ctrl+C para sair)...\n")
 
     try:
         while True:

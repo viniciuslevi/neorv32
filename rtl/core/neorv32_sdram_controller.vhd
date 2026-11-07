@@ -165,7 +165,19 @@ begin
 
   wb_err_o <= '0';  -- controlador nunca sinaliza erro de barramento
 
-  -- Latch da requisicao Wishbone: aceita um novo pedido apenas em S_IDLE
+  -- Latch da requisicao Wishbone. O XBUS do NEORV32 e Wishbone pipelined: stb
+  -- fica alto por UM ciclo so (cyc segue alto ate o ack). Por isso o pedido e
+  -- registrado em qualquer estado, desde que nao haja outro em andamento, e a
+  -- FSM o atende quando voltar a S_IDLE. A versao anterior so aceitava em
+  -- S_IDLE: um stb que chegasse durante um AUTO REFRESH (ou ainda na
+  -- inicializacao) se perdia, ninguem respondia, e o XBUS_TIMEOUT virava access
+  -- fault na CPU -- os ~14 700 faults por inferencia do Diario (4.3). Como o
+  -- refresh pendente e atendido justamente quando a FSM volta a S_IDLE, que e
+  -- quando o mestre manda o proximo stb, quase todo refresh matava um acesso.
+  -- Enquanto req_pending = '1' nada e aceito: um mestre Wishbone classico, que
+  -- segura stb ate ver o ack (fase 1 da testbench), nao duplica o pedido. O
+  -- mestre pipelined so manda o proximo stb depois do ack, quando req_pending
+  -- ja foi liberado em S_DONE.
   latch_req: process(rstn_i, clk_i)
   begin
     if (rstn_i = '0') then
@@ -175,7 +187,7 @@ begin
       req_sel     <= (others => '0');
       req_we      <= '0';
     elsif rising_edge(clk_i) then
-      if (state = S_IDLE and wb_cyc_i = '1' and wb_stb_i = '1' and req_pending = '0') then
+      if (wb_cyc_i = '1' and wb_stb_i = '1' and req_pending = '0') then
         req_pending <= '1';
         req_addr    <= wb_adr_i(26 downto 2);
         req_wdata   <= wb_dat_i;
