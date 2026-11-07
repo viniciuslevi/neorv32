@@ -52,3 +52,14 @@ riscof_work
 /rtl/core/output_*/
 /rtl/core/*_assignment_defaults.qdf
 /rtl/core/*.qws
+
+# Quartus build artifacts (projetos do TCC em rtl/tcc)
+/rtl/tcc/*/db/
+/rtl/tcc/*/incremental_db/
+/rtl/tcc/*/greybox_tmp/
+/rtl/tcc/*/simulation/
+/rtl/tcc/*/output_*/
+/rtl/tcc/*/.qsys_edit/
+/rtl/tcc/*/*.ipregen.rpt
+/rtl/tcc/*/*_assignment_defaults.qdf
+/rtl/tcc/*/*.qws

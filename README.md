@@ -1,5 +1,9 @@
 # The NEORV32 RISC-V Processor
 
+> **Fork para TCC.** No ramo `systolic-array-accelerator`, este fork contém um acelerador
+> sistólico INT8 e a inferência de uma CNN na DE2-115, em pastas `tcc/`. Veja
+> [`TCC.md`](TCC.md). O restante deste README é o original do NEORV32.
+
 [![datasheet (pdf)](https://img.shields.io/badge/Data%20Sheet-PDF-ffbd00?longCache=true&style=flat&logo=asciidoctor&colorA=273274)](https://github.com/stnolting/neorv32/releases/download/nightly_release/NEORV32-nightly.pdf)
 [![datasheet (html)](https://img.shields.io/badge/-HTML-ffbd00?longCache=true&style=flat)](https://stnolting.github.io/neorv32)
 [![userguide (pdf)](https://img.shields.io/badge/User%20Guide-PDF-ffbd00?longCache=true&style=flat&logo=asciidoctor&colorA=273274)](https://github.com/stnolting/neorv32/releases/download/nightly_release/NEORV32_UserGuide-nightly.pdf)
