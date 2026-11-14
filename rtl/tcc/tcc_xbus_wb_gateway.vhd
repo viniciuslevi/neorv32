@@ -7,7 +7,7 @@
 -- um decodificador de endereco + mux de retorno (dat_o/ack_o/err_o).               --
 -- -------------------------------------------------------------------------------- --
 -- Mapa de memoria (Fase 3 - Metodologia 3.5, hierarquia de modulos):               --
---   0xA0000000 - 0xA7FFFFFF (128 MB)  SDRAM (neorv32_sdram_controller)             --
+--   0xA0000000 - 0xA7FFFFFF (128 MB)  SDRAM (tcc_sdram_controller)             --
 --   0x90000000 - 0x9000FFFF (64 KB)   Acelerador sistolico (neorv32_systolic_wb_*) --
 -- Enderecos fora dessas janelas geram wb_err (acesso a regiao XBUS nao mapeada).   --
 -- NOTA: 0x80000000 e reservado (DMEM interno do NEORV32, generico DMEM_BASE) --    --
@@ -23,7 +23,7 @@ use ieee.numeric_std.all;
 library neorv32;
 use neorv32.neorv32_package.all;
 
-entity neorv32_xbus_wb_gateway is
+entity tcc_xbus_wb_gateway is
   generic (
     SDRAM_BASE_ADDR : std_ulogic_vector(31 downto 0) := x"A0000000";
     SDRAM_SIZE      : natural := 128 * 1024 * 1024;  -- 128 MB
@@ -67,9 +67,9 @@ entity neorv32_xbus_wb_gateway is
     accel_ack_i : in  std_ulogic;
     accel_err_i : in  std_ulogic
   );
-end neorv32_xbus_wb_gateway;
+end tcc_xbus_wb_gateway;
 
-architecture neorv32_xbus_wb_gateway_rtl of neorv32_xbus_wb_gateway is
+architecture neorv32_xbus_wb_gateway_rtl of tcc_xbus_wb_gateway is
 
   signal sel_sdram, sel_accel : std_ulogic;
 

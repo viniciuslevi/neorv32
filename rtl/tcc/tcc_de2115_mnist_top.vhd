@@ -27,7 +27,7 @@ use ieee.numeric_std.all;
 library neorv32;
 use neorv32.neorv32_package.all;
 
-entity neorv32_de2115_mnist_top is
+entity tcc_de2115_mnist_top is
   generic (
     CLOCK_FREQUENCY : natural := 50_000_000; -- clk_i, direto do oscilador da placa
     IMEM_SIZE       : natural := 32 * 1024;  -- 32 KB ROM interna (.text/.rodata)
@@ -67,9 +67,9 @@ entity neorv32_de2115_mnist_top is
     dram_ras_n_o : out std_ulogic;
     dram_we_n_o  : out std_ulogic
   );
-end neorv32_de2115_mnist_top;
+end tcc_de2115_mnist_top;
 
-architecture neorv32_de2115_mnist_top_rtl of neorv32_de2115_mnist_top is
+architecture neorv32_de2115_mnist_top_rtl of tcc_de2115_mnist_top is
 
   signal rstn_sync : std_ulogic;
   signal rst_meta  : std_ulogic;
@@ -182,7 +182,7 @@ begin
   );
 
   -- Gateway XBUS -> Wishbone (decodificacao de endereco) -----------------------------
-  gateway_inst: entity work.neorv32_xbus_wb_gateway
+  gateway_inst: entity work.tcc_xbus_wb_gateway
   port map (
     clk_i  => clk_i,
     rstn_i => rstn_sync,
@@ -224,7 +224,7 @@ begin
   -- -- revertido ate isolar se aquilo era um bug real ou uma gravacao JTAG
   -- ruim (o adaptador USB do Blaster pode ter o mesmo tipo de instabilidade
   -- ja visto no CH340 da UART nesta bancada).
-  sdram_inst: entity work.neorv32_sdram_controller
+  sdram_inst: entity work.tcc_sdram_controller
   port map (
     clk_i  => clk_i,
     rstn_i => sdram_rstn, -- segurado ate o PLL do DRAM_CLK travar
@@ -251,7 +251,7 @@ begin
   );
 
   -- Acelerador sistolico 8x8 INT8 (Wishbone) -------------------------------------------
-  accel_inst: entity work.neorv32_systolic_wb_accelerator
+  accel_inst: entity work.tcc_systolic_wb_accelerator
   port map (
     clk_i    => clk_i,
     rstn_i   => rstn_sync,

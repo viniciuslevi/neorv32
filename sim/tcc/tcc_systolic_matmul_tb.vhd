@@ -1,5 +1,5 @@
 -- ================================================================================ --
--- Testbench: neorv32_systolic_wb_accelerator - Verificacao de matmul 8x8x8 INT8    --
+-- Testbench: tcc_systolic_wb_accelerator - Verificacao de matmul 8x8x8 INT8    --
 -- -------------------------------------------------------------------------------- --
 -- Nivel 2 de verificacao (Metodologia 3.8: "Acelerador (sim)"). Atua como mestre    --
 -- Wishbone classico, carrega um tile de pesos e um tile de ativacoes com valores    --
@@ -12,8 +12,8 @@
 --               rtl/tcc/tcc_systolic_array.vhd \                              --
 --               rtl/tcc/tcc_systolic_wb_accelerator.vhd \                     --
 --               sim/tcc/tcc_systolic_matmul_tb.vhd                                 --
---             ghdl -e --std=08 neorv32_systolic_matmul_tb                          --
---             ghdl -r --std=08 neorv32_systolic_matmul_tb                          --
+--             ghdl -e --std=08 tcc_systolic_matmul_tb                          --
+--             ghdl -r --std=08 tcc_systolic_matmul_tb                          --
 -- ================================================================================ --
 
 library ieee;
@@ -21,10 +21,10 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use std.env.all;
 
-entity neorv32_systolic_matmul_tb is
-end neorv32_systolic_matmul_tb;
+entity tcc_systolic_matmul_tb is
+end tcc_systolic_matmul_tb;
 
-architecture tb of neorv32_systolic_matmul_tb is
+architecture tb of tcc_systolic_matmul_tb is
 
   constant CLK_PERIOD : time := 20 ns; -- 50 MHz
 
@@ -131,7 +131,7 @@ begin
 
   clk <= not clk after CLK_PERIOD / 2;
 
-  dut: entity work.neorv32_systolic_wb_accelerator
+  dut: entity work.tcc_systolic_wb_accelerator
     port map (
       clk_i    => clk,
       rstn_i   => rstn,
@@ -211,9 +211,9 @@ begin
     wait for CLK_PERIOD * 2;
 
     if errors = 0 then
-      report "=== neorv32_systolic_matmul_tb: TODOS OS 64 RESULTADOS CORRETOS (PASS) ===";
+      report "=== tcc_systolic_matmul_tb: TODOS OS 64 RESULTADOS CORRETOS (PASS) ===";
     else
-      report "=== neorv32_systolic_matmul_tb: " & integer'image(errors) & " ERROS (FAIL) ===" severity error;
+      report "=== tcc_systolic_matmul_tb: " & integer'image(errors) & " ERROS (FAIL) ===" severity error;
     end if;
 
     std.env.stop;

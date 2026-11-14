@@ -1,5 +1,5 @@
 -- ================================================================================ --
--- Testbench: neorv32_sdram_controller - Escrita/leitura + integridade sob refresh  --
+-- Testbench: tcc_sdram_controller - Escrita/leitura + integridade sob refresh  --
 -- -------------------------------------------------------------------------------- --
 -- Nivel 1/2 de verificacao (Metodologia 3.8). Conecta o controlador ao modelo       --
 -- comportamental (tcc_sdram_model.vhd) e, como mestre Wishbone classico,        --
@@ -9,8 +9,8 @@
 -- -------------------------------------------------------------------------------- --
 -- Uso (GHDL): ghdl -a --std=08 rtl/tcc/tcc_sdram_controller.vhd \              --
 --               sim/tcc/tcc_sdram_model.vhd sim/tcc/tcc_sdram_controller_tb.vhd    --
---             ghdl -e --std=08 neorv32_sdram_controller_tb                         --
---             ghdl -r --std=08 neorv32_sdram_controller_tb                         --
+--             ghdl -e --std=08 tcc_sdram_controller_tb                         --
+--             ghdl -r --std=08 tcc_sdram_controller_tb                         --
 -- ================================================================================ --
 
 library ieee;
@@ -18,10 +18,10 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use std.env.all;
 
-entity neorv32_sdram_controller_tb is
-end neorv32_sdram_controller_tb;
+entity tcc_sdram_controller_tb is
+end tcc_sdram_controller_tb;
 
-architecture tb of neorv32_sdram_controller_tb is
+architecture tb of tcc_sdram_controller_tb is
 
   constant CLK_PERIOD : time := 20 ns; -- 50 MHz
 
@@ -106,7 +106,7 @@ begin
   -- modelo ideal, entao um inversor simples aqui continua valido pro teste).
   dram_clk <= not clk;
 
-  dut: entity work.neorv32_sdram_controller
+  dut: entity work.tcc_sdram_controller
     generic map (
       INIT_WAIT_CYCLES   => 50,
       T_RP_CYCLES        => 1,
@@ -142,7 +142,7 @@ begin
       dram_we_n_o  => dram_we_n
     );
 
-  model: entity work.neorv32_sdram_model
+  model: entity work.tcc_sdram_model
     port map (
       dram_addr_i  => dram_addr,
       dram_ba_i    => dram_ba,
@@ -205,9 +205,9 @@ begin
     end loop;
 
     if errors = 0 then
-      report "=== neorv32_sdram_controller_tb: TODOS OS ENDERECOS OK, DADOS INTEGROS APOS REFRESH (PASS) ===";
+      report "=== tcc_sdram_controller_tb: TODOS OS ENDERECOS OK, DADOS INTEGROS APOS REFRESH (PASS) ===";
     else
-      report "=== neorv32_sdram_controller_tb: " & integer'image(errors) & " ERROS (FAIL) ===" severity error;
+      report "=== tcc_sdram_controller_tb: " & integer'image(errors) & " ERROS (FAIL) ===" severity error;
     end if;
 
     std.env.stop;

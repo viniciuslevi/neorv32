@@ -6,16 +6,15 @@ repositório antes de rodar.
 
 | Script | O que roda | Tempo |
 | --- | --- | --- |
-| `run_accel_sim.sh` | Testbenches unitárias: acelerador em 8×8 e 16×16 (`tcc_systolic_wb_accelerator_tb.vhd`), matmul 8×8×8, controlador SDRAM com mestre de `stb` de um ciclo (estilo XBUS) | segundos |
-| `run_soc_sim.sh [TILE]` | O top-level da placa inteiro (`tcc_de2115_soc_tb.vhd`) com o firmware `sw/tcc/accel_dma_test` gravado na IMEM: matmul e matvec pelos caminhos CPU, DMA e DMA com sobreposição, conferidos contra software | 10–20 min |
-| `run_infer_sim.sh [TILE] [MODO] [IMAGEM]` | O mesmo SoC com o firmware de inferência (`sw/tcc/mnist_infer`, `make SIM=1`): pesos e imagem carregados no modelo da SDRAM no tempo 0, logits conferidos contra o `expected.txt` do modelo (`MODEL_DIR`) | horas |
+| `run_accel_sim.sh` | Testbenches unitárias: acelerador (`tcc_systolic_wb_accelerator_tb.vhd`), matmul 8×8×8 e controlador SDRAM com o modelo de memória | segundos |
 
-Arquivos de apoio: `tcc_sdram_model.vhd` (modelo comportamental, com `ROW_BITS` e
-carga de arquivos binários) e `sdram_clk_pll_core_sim.vhd` (substitui o ALTPLL, que
-só existe no Quartus). `sim/sim_uart_rx.vhd` (texto do pino TX) é do NEORV32.
+Arquivo de apoio: `tcc_sdram_model.vhd` (modelo comportamental da SDRAM).
 
-As entidades mantêm os nomes `neorv32_*` usados no texto do TCC; só os arquivos
-têm o prefixo `tcc_`.
+Arquivos e entidades têm o prefixo `tcc_`.
+
+A simulação do SoC inteiro com o firmware, o caminho de DMA do acelerador e a
+correção do controlador de SDRAM (sessão 3 do diário, só em simulação) estão no
+ramo `tcc-dma-experimental`, fora da versão medida no TCC.
 
 O GHDL mcode relê os fontes `.vhd` no `-r`. Não edite nem apague um fonte, nem o
 próprio script, enquanto uma simulação dele estiver rodando. Os scripts copiam a

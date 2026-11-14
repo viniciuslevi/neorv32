@@ -542,6 +542,10 @@ horas.
 
 ## 12. Sessão 3: DMA e array 16×16 (só simulação, sem a placa)
 
+> O código desta sessão (DMA, correção do controlador de SDRAM, simulação do SoC e
+> `accel_dma_test`) foi retirado do ramo do TCC e está no ramo
+> `tcc-dma-experimental`. Os nomes de arquivo citados abaixo são os da época.
+
 ### 12.1 Access faults: o `stb` de um ciclo
 O XBUS do NEORV32 é Wishbone *pipelined*: `xbus_stb_o` fica alto por **um ciclo** e
 `xbus_cyc_o` segue alto até o `ack` (`neorv32_xbus.vhd`). O controlador SDRAM só

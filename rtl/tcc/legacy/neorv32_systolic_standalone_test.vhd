@@ -75,7 +75,7 @@ begin
 	act_cols    <= x"01_01_01_01_01_01_01_01";
 
 	-- Broadcast each row's weight byte across all columns of the flattened
-	-- weight-stationary tile expected by neorv32_systolic_array's weight_i,
+	-- weight-stationary tile expected by tcc_systolic_array's weight_i,
 	-- reproducing the old per-row broadcast so the expected test result
 	-- (sum 1+2+...+8 = 0x24 per column) is unchanged.
 	gen_weight_bcast : for row in 0 to ARRAY_ROWS - 1 generate
@@ -124,7 +124,7 @@ begin
 		end if;
 	end process;
 
-	systolic_array_inst : entity work.neorv32_systolic_array
+	systolic_array_inst : entity work.tcc_systolic_array
 		generic map (
 			ARRAY_ROWS => ARRAY_ROWS,
 			ARRAY_COLS => ARRAY_COLS,

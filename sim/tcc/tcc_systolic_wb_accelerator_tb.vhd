@@ -17,10 +17,10 @@ use ieee.numeric_std.all;
 library neorv32;
 use neorv32.neorv32_package.all;
 
-entity neorv32_systolic_wb_accelerator_tb is
-end neorv32_systolic_wb_accelerator_tb;
+entity tcc_systolic_wb_accelerator_tb is
+end tcc_systolic_wb_accelerator_tb;
 
-architecture tb_rtl of neorv32_systolic_wb_accelerator_tb is
+architecture tb_rtl of tcc_systolic_wb_accelerator_tb is
 
   constant CLOCK_FREQUENCY : natural := 100_000_000;
   constant f_period_c      : time    := (1 sec) / CLOCK_FREQUENCY;
@@ -47,7 +47,7 @@ begin
   clk_gen   <= (not clk_gen) and test_done after (f_period_c/2);
   rstn_i    <= '0', '1' after 30*(f_period_c/2);
 
-  dut: entity work.neorv32_systolic_wb_accelerator
+  dut: entity work.tcc_systolic_wb_accelerator
     port map (
       clk_i    => clk_i,
       rstn_i   => rstn_i,

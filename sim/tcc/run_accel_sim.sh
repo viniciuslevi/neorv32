@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")/../.."
 
 GHDL="${GHDL:-ghdl}"
-ACCEL_TB="${1:-neorv32_systolic_wb_accelerator_tb}"
+ACCEL_TB="${1:-tcc_systolic_wb_accelerator_tb}"
 
 mkdir -p sim/build
 

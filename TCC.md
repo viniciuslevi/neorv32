@@ -16,21 +16,26 @@ no fim deste arquivo.
 
 | Pasta | Conteúdo |
 | --- | --- |
-| `rtl/tcc/` | Hardware: elemento de processamento (`tcc_systolic_pe.vhd`), matriz sistólica (`tcc_systolic_array.vhd`), acelerador com interface Wishbone e DMA (`tcc_systolic_wb_accelerator.vhd`), controlador de SDRAM (`tcc_sdram_controller.vhd`), ponte XBUS→Wishbone (`tcc_xbus_wb_gateway.vhd`) e top-level da DE2-115 (`tcc_de2115_mnist_top.vhd`) |
+| `rtl/tcc/` | Hardware: elemento de processamento (`tcc_systolic_pe.vhd`), matriz sistólica (`tcc_systolic_array.vhd`), acelerador com interface Wishbone (`tcc_systolic_wb_accelerator.vhd`), controlador de SDRAM (`tcc_sdram_controller.vhd`), ponte XBUS→Wishbone (`tcc_xbus_wb_gateway.vhd`) e top-level da DE2-115 (`tcc_de2115_mnist_top.vhd`) |
 | `rtl/tcc/ip/` | PLL do *clock* da SDRAM (`sdram_clk_pll_core`, gerado pelo ALTPLL do Quartus) |
 | `rtl/tcc/quartus/` | Projeto Quartus do SoC completo (`tcc_mnist_accel.qpf/.qsf/.sdc`) |
 | `rtl/tcc/legacy/` | Versões anteriores, fora do projeto final: acelerador como CFS (`neorv32_systolic_accelator.vhd`), `neorv32_systolic_top.vhd` e o teste isolado da matriz na placa (`neorv32_systolic_standalone_test.vhd`, projeto `kai.qpf`) |
 | `sim/tcc/` | Testbenches, modelo de SDRAM e scripts de simulação no GHDL (ver `sim/tcc/README.md`) |
 | `sw/tcc/mnist_infer/` | *Firmware* de inferência: carga de pesos e imagem pela UART, camadas da CNN, *driver* do acelerador, tratador de falhas da SDRAM, LCD |
 | `sw/tcc/test_systolic_accel/` | Teste do acelerador na placa (`ALL TESTS PASSED`) |
-| `sw/tcc/accel_dma_test/` | Teste dos caminhos CPU, DMA e DMA com sobreposição (simulação do SoC) |
 | `sw/tcc/tools/` | `uart_upload.py`: envio do executável ao *bootloader* pelo Windows |
 | `docs/tcc/` | Diário de bring-up, registro de depuração, guia de execução e notas de planejamento |
 
-Os **arquivos** do TCC têm o prefixo `tcc_`. As **entidades** VHDL mantêm os nomes
-`neorv32_*` usados no texto e nas figuras do TCC (por exemplo, `tcc_systolic_pe.vhd`
-declara `neorv32_systolic_pe`) e são compiladas na biblioteca `neorv32`, porque
-usam o `neorv32_package`.
+Os **arquivos** e as **entidades** VHDL do TCC têm o prefixo `tcc_` (por exemplo,
+`tcc_systolic_pe.vhd` declara `tcc_systolic_pe`). As entidades são compiladas na
+biblioteca `neorv32`, porque usam o `neorv32_package`. Nas versões usadas nas
+medições do TCC, arquivos e entidades tinham o prefixo `neorv32_`; as versões
+anteriores em `rtl/tcc/legacy/` mantêm os nomes originais.
+
+O hardware e o *firmware* deste ramo são os das medições do TCC. O caminho de DMA
+do acelerador, a correção do controlador de SDRAM e a simulação do SoC inteiro,
+feitos depois das medições e testados só em simulação, estão no ramo
+`tcc-dma-experimental`.
 
 ## Como usar
 

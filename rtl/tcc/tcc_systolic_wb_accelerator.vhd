@@ -27,7 +27,7 @@
   use neorv32.neorv32_package.all;
 
   -- Entidade: interface Wishbone classica do acelerador sistolico
-  entity neorv32_systolic_wb_accelerator is
+  entity tcc_systolic_wb_accelerator is
     port (
       -- Clock e reset (ativo-baixo, convencao NEORV32)
       clk_i   : in  std_ulogic;                        -- Clock global do sistema
@@ -47,10 +47,10 @@
       wb_ack_o : out std_ulogic;                        -- Acknowledge: transacao concluida
       wb_err_o : out std_ulogic                         -- Error: erro na transacao
     );
-  end neorv32_systolic_wb_accelerator;
+  end tcc_systolic_wb_accelerator;
 
   -- Arquitetura: logica RTL do acelerador com interface Wishbone
-  architecture neorv32_systolic_wb_rtl of neorv32_systolic_wb_accelerator is
+  architecture neorv32_systolic_wb_rtl of tcc_systolic_wb_accelerator is
 
     -- Dimensoes do array sistolico
     constant ARRAY_ROWS : natural := 8;   -- Numero de linhas do array (8 PEs por coluna)
@@ -325,7 +325,7 @@
           -- resultado apos 1 ciclo em vez dos 15 necessarios. So afeta a
           -- linha 0 corretamente por acaso (done_reg comeca zerado no
           -- reset); linhas seguintes ficavam sistematicamente erradas.
-          -- Bug real encontrado via simulacao GHDL (neorv32_systolic_matmul_tb).
+          -- Bug real encontrado via simulacao GHDL (tcc_systolic_matmul_tb).
           when S_COMPUTE =>
             if (array_done = '1' and array_start = '0') then
               -- Armazena os resultados de cada coluna na memoria
@@ -359,7 +359,7 @@
 
     -- Instanciacao do array sistolico 8x8
     -- Conecta os sinais internos do acelerador ao componente do array
-    systolic_array_inst : entity work.neorv32_systolic_array
+    systolic_array_inst : entity work.tcc_systolic_array
       generic map (
         ARRAY_ROWS => ARRAY_ROWS,  -- 8 linhas
         ARRAY_COLS => ARRAY_COLS,  -- 8 colunas

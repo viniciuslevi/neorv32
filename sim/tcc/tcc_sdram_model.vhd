@@ -1,7 +1,7 @@
 -- ================================================================================ --
 -- Modelo comportamental de SDR SDRAM para simulacao (NAO sintetizavel)             --
 -- -------------------------------------------------------------------------------- --
--- Decodifica o mesmo conjunto de comandos JEDEC usado por neorv32_sdram_controller --
+-- Decodifica o mesmo conjunto de comandos JEDEC usado por tcc_sdram_controller --
 -- (cs_n,ras_n,cas_n,we_n) e implementa ACTIVE/READ/WRITE/PRECHARGE/REFRESH/MRS de   --
 -- forma funcional (sem modelar tempos de acesso do datasheet -- o objetivo aqui e   --
 -- validar a SEQUENCIA de comandos e a integridade dos dados, nao timing).           --
@@ -9,7 +9,7 @@
 -- Limitacao deliberada: para manter a simulacao leve, o array de armazenamento     --
 -- cobre apenas ROW(3 downto 0) (16 linhas) x todas as colunas x todos os bancos     --
 -- (16 * 1024 * 4 = 65536 words). Os testes devem usar apenas linhas 0-15 -- ver     --
--- neorv32_sdram_controller_tb.vhd.                                                 --
+-- tcc_sdram_controller_tb.vhd.                                                 --
 -- -------------------------------------------------------------------------------- --
 -- Licensed under the BSD-3-Clause license                                          --
 -- ================================================================================ --
@@ -18,7 +18,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-entity neorv32_sdram_model is
+entity tcc_sdram_model is
   port (
     dram_addr_i  : in    std_ulogic_vector(12 downto 0);
     dram_ba_i    : in    std_ulogic_vector(1 downto 0);
@@ -31,9 +31,9 @@ entity neorv32_sdram_model is
     dram_ras_n_i : in    std_ulogic;
     dram_we_n_i  : in    std_ulogic
   );
-end neorv32_sdram_model;
+end tcc_sdram_model;
 
-architecture behavioral of neorv32_sdram_model is
+architecture behavioral of tcc_sdram_model is
 
   constant CAS_LATENCY : natural := 2;
 
@@ -92,7 +92,7 @@ begin
 
         when "0100" => -- WRITE
           assert row_active(to_integer(unsigned(dram_ba_i))) = '1'
-            report "neorv32_sdram_model: WRITE sem ACTIVE previo no banco" severity error;
+            report "tcc_sdram_model: WRITE sem ACTIVE previo no banco" severity error;
           idx := model_index(dram_ba_i, open_row(to_integer(unsigned(dram_ba_i))), dram_addr_i(9 downto 0));
           for b in 0 to 3 loop
             if dram_dqm_i(b) = '0' then
@@ -102,7 +102,7 @@ begin
 
         when "0101" => -- READ
           assert row_active(to_integer(unsigned(dram_ba_i))) = '1'
-            report "neorv32_sdram_model: READ sem ACTIVE previo no banco" severity error;
+            report "tcc_sdram_model: READ sem ACTIVE previo no banco" severity error;
           idx := model_index(dram_ba_i, open_row(to_integer(unsigned(dram_ba_i))), dram_addr_i(9 downto 0));
           -- agenda a saida do dado CAS_LATENCY ciclos a frente (processo separado)
           col_latched  <= dram_addr_i(9 downto 0);
