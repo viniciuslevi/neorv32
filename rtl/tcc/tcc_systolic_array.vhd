@@ -33,7 +33,7 @@ use ieee.numeric_std.all;
 library neorv32;
 use neorv32.neorv32_package.all;
 
-entity neorv32_systolic_array is
+entity tcc_systolic_array is
   generic (
     ARRAY_ROWS : natural := 8;
     ARRAY_COLS : natural := 8;
@@ -55,9 +55,9 @@ entity neorv32_systolic_array is
 
     result_o      : out std_ulogic_vector(ARRAY_COLS*ACC_WIDTH-1 downto 0)
   );
-end neorv32_systolic_array;
+end tcc_systolic_array;
 
-architecture neorv32_systolic_array_rtl of neorv32_systolic_array is
+architecture neorv32_systolic_array_rtl of tcc_systolic_array is
 
   -- "Array de arrays" (nao array 2D verdadeiro) por portabilidade: elementos
   -- individuais sao pilotados por processos/instancias distintas geradas via
@@ -150,13 +150,13 @@ begin
   -- ativacao (entrando na coluna 0) uma coluna por ciclo.
   --
   -- IMPORTANTE: tambem zera no inicio de CADA novo start_i (nao so no
-  -- clear_i explicito). O acelerador (neorv32_systolic_wb_accelerator)
+  -- clear_i explicito). O acelerador (tcc_systolic_wb_accelerator)
   -- dispara varios start_i em sequencia -- um por linha do tile de
   -- ativacoes -- sem pulsar clear_i entre eles. Sem este reset por-start,
   -- valores remanescentes de uma linha anterior ficam "em transito" nas
   -- colunas 1..7 quando a proxima linha comeca, contaminando a soma parcial
   -- durante os primeiros ciclos (ate o pipeline "lavar" o valor antigo).
-  -- Bug real encontrado via simulacao GHDL (neorv32_systolic_matmul_tb):
+  -- Bug real encontrado via simulacao GHDL (tcc_systolic_matmul_tb):
   -- a linha 0 sempre batia (pipe zerado so pelo reset global), as linhas
   -- seguintes divergiam cada vez mais.
   skew_proc: process(rstn_i, clk_i)
@@ -201,7 +201,7 @@ begin
         p_in_pe(row)(col) <= pe_p_out(row-1)(col);
       end generate;
 
-      pe_inst: entity work.neorv32_systolic_pe
+      pe_inst: entity work.tcc_systolic_pe
         generic map (
           DATA_WIDTH => DATA_WIDTH,
           ACC_WIDTH  => ACC_WIDTH

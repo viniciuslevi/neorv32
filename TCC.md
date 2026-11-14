@@ -27,10 +27,11 @@ no fim deste arquivo.
 | `sw/tcc/tools/` | `uart_upload.py`: envio do executável ao *bootloader* pelo Windows |
 | `docs/tcc/` | Diário de bring-up, registro de depuração, guia de execução e notas de planejamento |
 
-Os **arquivos** do TCC têm o prefixo `tcc_`. As **entidades** VHDL mantêm os nomes
-`neorv32_*` usados no texto e nas figuras do TCC (por exemplo, `tcc_systolic_pe.vhd`
-declara `neorv32_systolic_pe`) e são compiladas na biblioteca `neorv32`, porque
-usam o `neorv32_package`.
+Os **arquivos** e as **entidades** VHDL do TCC têm o prefixo `tcc_` (por exemplo,
+`tcc_systolic_pe.vhd` declara `tcc_systolic_pe`). As entidades são compiladas na
+biblioteca `neorv32`, porque usam o `neorv32_package`. Nas versões usadas nas
+medições do TCC, arquivos e entidades tinham o prefixo `neorv32_`; as versões
+anteriores em `rtl/tcc/legacy/` mantêm os nomes originais.
 
 ## Como usar
 

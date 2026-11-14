@@ -69,12 +69,12 @@ G="--std=08 --workdir=${WORK} --work=neorv32"
 for f in ${FILES}; do
   "${GHDL}" -a ${G} "${f}"
 done
-"${GHDL}" -e ${G} neorv32_de2115_soc_tb
+"${GHDL}" -e ${G} tcc_de2115_soc_tb
 
 echo "=== Rodando: ${IMAGE}, tile ${TILE}x${TILE}, modo ${MODE} ==="
 LOG="sim/build/${TAG}.log"
 # SDRAM_OFF_INPUT = 0x00100000 (sdram.h); 11 bits de linha cobrem 8 MB do banco 0
-"${GHDL}" -r ${G} neorv32_de2115_soc_tb -gT="${TILE}" -gMAX_MS="${MAX_MS}" \
+"${GHDL}" -r ${G} tcc_de2115_soc_tb -gT="${TILE}" -gMAX_MS="${MAX_MS}" \
   -gUART_LOG="sim/build/${TAG}_uart0" -gSDRAM_ROW_BITS=11 \
   -gSDRAM_INIT0="${WEIGHTS}" -gSDRAM_OFFS0=0 \
   -gSDRAM_INIT1="${IMGFILE}" -gSDRAM_OFFS1=1048576 \

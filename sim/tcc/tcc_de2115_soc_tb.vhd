@@ -1,5 +1,5 @@
 -- ================================================================================ --
--- Testbench do SoC: neorv32_de2115_mnist_top + modelo de SDRAM                     --
+-- Testbench do SoC: tcc_de2115_mnist_top + modelo de SDRAM                     --
 -- -------------------------------------------------------------------------------- --
 -- Simula o top-level da placa inteiro: NEORV32 (com DMA e cache de instrucoes),    --
 -- gateway XBUS, controlador SDRAM + modelo comportamental, acelerador sistolico.   --
@@ -16,7 +16,7 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use std.env.all;
 
-entity neorv32_de2115_soc_tb is
+entity tcc_de2115_soc_tb is
   generic (
     T        : natural := 8;       -- tamanho do array sistolico
     MAX_MS    : natural := 400;    -- tempo simulado maximo, em ms
@@ -30,9 +30,9 @@ entity neorv32_de2115_soc_tb is
     SDRAM_INIT1    : string  := "";
     SDRAM_OFFS1    : natural := 0
   );
-end neorv32_de2115_soc_tb;
+end tcc_de2115_soc_tb;
 
-architecture tb of neorv32_de2115_soc_tb is
+architecture tb of tcc_de2115_soc_tb is
 
   constant CLK_PERIOD : time := 20 ns; -- 50 MHz, como o CLOCK_50 da placa
 
@@ -57,7 +57,7 @@ begin
 
   clk <= not clk after CLK_PERIOD / 2;
 
-  dut: entity work.neorv32_de2115_mnist_top
+  dut: entity work.tcc_de2115_mnist_top
     generic map (
       CLOCK_FREQUENCY  => 50_000_000,
       BOOT_MODE_SELECT => 2,
@@ -101,7 +101,7 @@ begin
       rxd => txd
     );
 
-  sdram: entity work.neorv32_sdram_model
+  sdram: entity work.tcc_sdram_model
     generic map (
       ROW_BITS   => SDRAM_ROW_BITS,
       INIT_FILE0 => SDRAM_INIT0,
@@ -139,13 +139,13 @@ begin
     key_n <= "11"; -- solta o reset
     wait until (ledg = x"A5") or (ledg = x"EE") for MAX_MS * 1 ms;
     if ledg = x"A5" then
-      report "=== neorv32_de2115_soc_tb (" & integer'image(T) & "x" & integer'image(T) &
+      report "=== tcc_de2115_soc_tb (" & integer'image(T) & "x" & integer'image(T) &
              "): firmware reportou PASS em " & time'image(now) & " ===";
     elsif ledg = x"EE" then
-      report "=== neorv32_de2115_soc_tb (" & integer'image(T) & "x" & integer'image(T) &
+      report "=== tcc_de2115_soc_tb (" & integer'image(T) & "x" & integer'image(T) &
              "): firmware reportou FAIL em " & time'image(now) & " ===" severity error;
     else
-      report "=== neorv32_de2115_soc_tb: TIMEOUT (LEDG = 0x" & to_hstring(ledg) & ") ===" severity error;
+      report "=== tcc_de2115_soc_tb: TIMEOUT (LEDG = 0x" & to_hstring(ledg) & ") ===" severity error;
     end if;
     std.env.stop;
   end process;

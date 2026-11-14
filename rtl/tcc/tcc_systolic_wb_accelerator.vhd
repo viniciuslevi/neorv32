@@ -32,7 +32,7 @@
   use neorv32.neorv32_package.all;
 
   -- Entidade: interface Wishbone classica do acelerador sistolico
-  entity neorv32_systolic_wb_accelerator is
+  entity tcc_systolic_wb_accelerator is
     generic (
       ARRAY_SIZE : natural range 2 to 16 := 8  -- array ARRAY_SIZE x ARRAY_SIZE (8 ou 16)
     );
@@ -55,13 +55,13 @@
       wb_ack_o : out std_ulogic;                        -- Acknowledge: transacao concluida
       wb_err_o : out std_ulogic                         -- Error: erro na transacao
     );
-  end neorv32_systolic_wb_accelerator;
+  end tcc_systolic_wb_accelerator;
 
   -- Arquitetura: logica RTL do acelerador com interface Wishbone
-  architecture neorv32_systolic_wb_rtl of neorv32_systolic_wb_accelerator is
+  architecture neorv32_systolic_wb_rtl of tcc_systolic_wb_accelerator is
 
     -- Dimensoes do array sistolico. O array e quadrado: o wrapper e
-    -- neorv32_systolic_array indexam act_cols_i por linha, o que so fecha com
+    -- tcc_systolic_array indexam act_cols_i por linha, o que so fecha com
     -- ARRAY_ROWS = ARRAY_COLS.
     constant ARRAY_ROWS : natural := ARRAY_SIZE;  -- PEs por coluna
     constant ARRAY_COLS : natural := ARRAY_SIZE;  -- PEs por linha
@@ -347,7 +347,7 @@
           -- resultado apos 1 ciclo em vez dos 15 necessarios. So afeta a
           -- linha 0 corretamente por acaso (done_reg comeca zerado no
           -- reset); linhas seguintes ficavam sistematicamente erradas.
-          -- Bug real encontrado via simulacao GHDL (neorv32_systolic_matmul_tb).
+          -- Bug real encontrado via simulacao GHDL (tcc_systolic_matmul_tb).
           when S_COMPUTE =>
             if (array_done = '1' and array_start = '0') then
               -- Armazena os resultados de cada coluna na memoria
@@ -381,7 +381,7 @@
 
     -- Instanciacao do array sistolico TxT
     -- Conecta os sinais internos do acelerador ao componente do array
-    systolic_array_inst : entity work.neorv32_systolic_array
+    systolic_array_inst : entity work.tcc_systolic_array
       generic map (
         ARRAY_ROWS => ARRAY_ROWS,  -- T linhas
         ARRAY_COLS => ARRAY_COLS,  -- T colunas

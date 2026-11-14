@@ -1,5 +1,5 @@
 -- ================================================================================ --
--- Testbench: neorv32_systolic_wb_accelerator - registradores, matmul TxT e IRQ      --
+-- Testbench: tcc_systolic_wb_accelerator - registradores, matmul TxT e IRQ      --
 -- -------------------------------------------------------------------------------- --
 -- Autoverificavel, com o tamanho do array como generic (T = 8 ou 16):              --
 --   1. INFO devolve T linhas x T colunas                                           --
@@ -11,7 +11,7 @@
 --   4. A IRQ so sobe no fim da operacao inteira, nao depois da primeira linha      --
 -- -------------------------------------------------------------------------------- --
 -- Uso (GHDL): ver sim/tcc/run_accel_sim.sh, ou                                          --
---   ghdl -r --std=08 neorv32_systolic_wb_accelerator_tb -gT=16                     --
+--   ghdl -r --std=08 tcc_systolic_wb_accelerator_tb -gT=16                     --
 -- ================================================================================ --
 
 library ieee;
@@ -19,13 +19,13 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 use std.env.all;
 
-entity neorv32_systolic_wb_accelerator_tb is
+entity tcc_systolic_wb_accelerator_tb is
   generic (
     T : natural := 8
   );
-end neorv32_systolic_wb_accelerator_tb;
+end tcc_systolic_wb_accelerator_tb;
 
-architecture tb of neorv32_systolic_wb_accelerator_tb is
+architecture tb of tcc_systolic_wb_accelerator_tb is
 
   constant CLK_PERIOD : time := 20 ns; -- 50 MHz
 
@@ -82,7 +82,7 @@ begin
 
   clk <= not clk after CLK_PERIOD / 2;
 
-  dut: entity work.neorv32_systolic_wb_accelerator
+  dut: entity work.tcc_systolic_wb_accelerator
     generic map (
       ARRAY_SIZE => T
     )
@@ -257,10 +257,10 @@ begin
     check_result(2);
 
     if errors = 0 then
-      report "=== neorv32_systolic_wb_accelerator_tb (" & integer'image(T) & "x" & integer'image(T) &
+      report "=== tcc_systolic_wb_accelerator_tb (" & integer'image(T) & "x" & integer'image(T) &
              "): INFO, 3 x " & integer'image(T*T) & " resultados, IRQ e escrita de WEIGHT durante o calculo OK (PASS) ===";
     else
-      report "=== neorv32_systolic_wb_accelerator_tb (" & integer'image(T) & "x" & integer'image(T) &
+      report "=== tcc_systolic_wb_accelerator_tb (" & integer'image(T) & "x" & integer'image(T) &
              "): " & integer'image(errors) & " ERROS (FAIL) ===" severity error;
     end if;
     std.env.stop;

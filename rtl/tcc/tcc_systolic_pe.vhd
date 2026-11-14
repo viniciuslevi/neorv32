@@ -14,7 +14,7 @@ use ieee.numeric_std.all;
 library neorv32;
 use neorv32.neorv32_package.all;
 
-entity neorv32_systolic_pe is
+entity tcc_systolic_pe is
   generic (
     DATA_WIDTH : natural := 8;
     ACC_WIDTH  : natural := 32
@@ -33,9 +33,9 @@ entity neorv32_systolic_pe is
     w_out_o : out std_ulogic_vector(DATA_WIDTH-1 downto 0);
     p_out_o : out std_ulogic_vector(ACC_WIDTH-1 downto 0)
   );
-end neorv32_systolic_pe;
+end tcc_systolic_pe;
 
-architecture neorv32_systolic_pe_rtl of neorv32_systolic_pe is
+architecture neorv32_systolic_pe_rtl of tcc_systolic_pe is
 
   signal a_reg   : std_ulogic_vector(DATA_WIDTH-1 downto 0);
   signal w_reg   : std_ulogic_vector(DATA_WIDTH-1 downto 0);

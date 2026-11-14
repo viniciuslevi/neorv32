@@ -46,7 +46,7 @@ use ieee.numeric_std.all;
 library neorv32;
 use neorv32.neorv32_package.all;
 
-entity neorv32_sdram_controller is
+entity tcc_sdram_controller is
   generic (
     -- Contadores de temporizacao (em ciclos de clk_i @ 50 MHz); ver cabecalho.
     INIT_WAIT_CYCLES  : natural := 5000;  -- >= 100 us @ 50 MHz
@@ -91,9 +91,9 @@ entity neorv32_sdram_controller is
     dram_ras_n_o : out std_ulogic;
     dram_we_n_o  : out std_ulogic
   );
-end neorv32_sdram_controller;
+end tcc_sdram_controller;
 
-architecture neorv32_sdram_controller_rtl of neorv32_sdram_controller is
+architecture neorv32_sdram_controller_rtl of tcc_sdram_controller is
 
   -- Comandos SDR SDRAM: (cs_n, ras_n, cas_n, we_n)
   subtype cmd_t is std_ulogic_vector(3 downto 0);
@@ -404,7 +404,7 @@ begin
           -- um estado S_READ_CAPTURE separado adiciona 1 ciclo de atraso
           -- (a transicao de estado ja consome 1 ciclo) e amostra
           -- dram_dq_io depois que ele ja voltou a alta impedancia. Bug real
-          -- encontrado via simulacao GHDL (neorv32_sdram_controller_tb).
+          -- encontrado via simulacao GHDL (tcc_sdram_controller_tb).
           dram_dqm_o <= (others => '0');
           if (wait_cnt < CAS_LATENCY - 1) then
             wait_cnt <= wait_cnt + 1;

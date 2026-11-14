@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Testbenches unitarias do projeto do TCC no GHDL (sem CPU, rapidas):
-#   neorv32_systolic_wb_accelerator_tb  T=8 e T=16 (registradores, matmul, IRQ)
-#   neorv32_systolic_matmul_tb          matmul 8x8x8 com valores conhecidos
-#   neorv32_sdram_controller_tb         escrita/leitura, refresh e mestre com
+#   tcc_systolic_wb_accelerator_tb  T=8 e T=16 (registradores, matmul, IRQ)
+#   tcc_systolic_matmul_tb          matmul 8x8x8 com valores conhecidos
+#   tcc_sdram_controller_tb         escrita/leitura, refresh e mestre com
 #                                       stb de 1 ciclo (estilo XBUS)
 # A simulacao do SoC inteiro, com firmware, fica em sim/tcc/run_soc_sim.sh.
 #
@@ -41,10 +41,10 @@ run() {
   "${GHDL}" -r ${G} "${tb}" "$@" --ieee-asserts=disable 2>&1 | tee -a "${LOG}" | grep -E '===|error'
 }
 
-run neorv32_systolic_wb_accelerator_tb -gT=8
-run neorv32_systolic_wb_accelerator_tb -gT=16
-run neorv32_systolic_matmul_tb
-run neorv32_sdram_controller_tb
+run tcc_systolic_wb_accelerator_tb -gT=8
+run tcc_systolic_wb_accelerator_tb -gT=16
+run tcc_systolic_matmul_tb
+run tcc_sdram_controller_tb
 
 if grep -qE 'FAIL|error' "${LOG}"; then
   echo "FAIL: ver ${LOG}"

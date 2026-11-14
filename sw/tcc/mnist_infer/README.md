@@ -127,11 +127,11 @@ Passo a passo completo, com armadilhas: `docs/tcc/Guia de Execucao.md`.
   ghdl -a --std=08 --work=neorv32 rtl/core/neorv32_package.vhd
   ghdl -a --std=08 -P. rtl/tcc/tcc_systolic_pe.vhd rtl/tcc/tcc_systolic_array.vhd \
       rtl/tcc/tcc_systolic_wb_accelerator.vhd sim/tcc/tcc_systolic_matmul_tb.vhd
-  ghdl -e --std=08 -P. neorv32_systolic_matmul_tb && ghdl -r --std=08 -P. neorv32_systolic_matmul_tb
+  ghdl -e --std=08 -P. tcc_systolic_matmul_tb && ghdl -r --std=08 -P. tcc_systolic_matmul_tb
 
   ghdl -a --std=08 -P. rtl/tcc/tcc_sdram_controller.vhd sim/tcc/tcc_sdram_model.vhd \
       sim/tcc/tcc_sdram_controller_tb.vhd
-  ghdl -e --std=08 -P. neorv32_sdram_controller_tb && ghdl -r --std=08 -P. neorv32_sdram_controller_tb
+  ghdl -e --std=08 -P. tcc_sdram_controller_tb && ghdl -r --std=08 -P. tcc_sdram_controller_tb
   ```
 - **Inferência real na DE2-115**: ✅ **executada de ponta a ponta** — handshake UART,
   carga de `weights.bin` (422 344 B) + imagem de teste, todas as camadas da CNN, e

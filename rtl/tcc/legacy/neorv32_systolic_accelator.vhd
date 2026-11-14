@@ -228,7 +228,7 @@ begin
     end if;
   end process compute_fsm;
 
-  systolic_array_inst: entity work.neorv32_systolic_array
+  systolic_array_inst: entity work.tcc_systolic_array
     generic map (
       ARRAY_ROWS => ARRAY_ROWS,
       ARRAY_COLS => ARRAY_COLS,

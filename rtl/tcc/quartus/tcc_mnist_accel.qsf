@@ -8,7 +8,7 @@
 
 set_global_assignment -name FAMILY "Cyclone IV E"
 set_global_assignment -name DEVICE EP4CE115F29C7
-set_global_assignment -name TOP_LEVEL_ENTITY neorv32_de2115_mnist_top
+set_global_assignment -name TOP_LEVEL_ENTITY tcc_de2115_mnist_top
 set_global_assignment -name ORIGINAL_QUARTUS_VERSION 18.1.0
 set_global_assignment -name LAST_QUARTUS_VERSION "25.1std.0 Standard Edition"
 set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files_mnist_accel

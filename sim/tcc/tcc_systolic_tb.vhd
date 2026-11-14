@@ -13,7 +13,7 @@ use ieee.math_real.all;
 library neorv32;
 use neorv32.neorv32_package.all;
 
-entity neorv32_systolic_tb is
+entity tcc_systolic_tb is
   generic (
     CLOCK_FREQUENCY   : natural                        := 100_000_000;
     DUAL_CORE_EN      : boolean                        := false;
@@ -34,9 +34,9 @@ entity neorv32_systolic_tb is
     ACCEL_BASE        : std_ulogic_vector(31 downto 0) := x"90000000";
     ACCEL_SIZE        : natural                        := 4096
   );
-end neorv32_systolic_tb;
+end tcc_systolic_tb;
 
-architecture tb_rtl of neorv32_systolic_tb is
+architecture tb_rtl of tcc_systolic_tb is
 
   signal clk_en, clk_gen, rst_gen : std_ulogic;
   constant f_period_c : time := (1 sec) / CLOCK_FREQUENCY;
@@ -148,7 +148,7 @@ begin
     dev_7_req_o => open,               dev_7_rsp_i => xbus_rsp_terminate_c
   );
 
-  accelerator_inst: entity work.neorv32_systolic_wb_accelerator
+  accelerator_inst: entity work.tcc_systolic_wb_accelerator
     port map (
       clk_i    => clk_gen,
       rstn_i   => rst_gen,

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Simulacao do SoC da placa (neorv32_de2115_mnist_top + modelo de SDRAM) no GHDL,
+# Simulacao do SoC da placa (tcc_de2115_mnist_top + modelo de SDRAM) no GHDL,
 # rodando um firmware gravado na IMEM.
 #
 #   sim/tcc/run_soc_sim.sh [TILE] [APP]
@@ -55,11 +55,11 @@ G="--std=08 --workdir=${WORK} --work=neorv32"
 for f in ${FILES}; do
   "${GHDL}" -a ${G} "${f}"
 done
-"${GHDL}" -e ${G} neorv32_de2115_soc_tb
+"${GHDL}" -e ${G} tcc_de2115_soc_tb
 
 echo "=== Rodando (tile ${TILE}x${TILE}) ==="
 LOG="sim/build/${TAG}.log"
-"${GHDL}" -r ${G} neorv32_de2115_soc_tb -gT="${TILE}" -gUART_LOG="sim/build/${TAG}_uart0" \
+"${GHDL}" -r ${G} tcc_de2115_soc_tb -gT="${TILE}" -gUART_LOG="sim/build/${TAG}_uart0" \
   --ieee-asserts=disable --max-stack-alloc=0 2>&1 | tee "${LOG}"
 
 if grep -q "firmware reportou PASS" "${LOG}"; then
