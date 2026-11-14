@@ -36,77 +36,39 @@ static void wait_key1(void) {
     neorv32_aux_delay_ms(clk, 20);
 }
 
-// Comandos 'S' e 'C': repetem a inferencia da mesma imagem por outro caminho e
-// comparam com a do acelerador com DMA. 'S' = so na CPU, mede o ganho sobre a
-// rede inteira (o bench_sw_vs_hw mede um unico tile). 'C' = acelerador com a
-// CPU movendo os dados (o caminho de antes do DMA), mede o ganho do DMA. Nos
-// dois casos os logits tem de ser identicos.
-static void compare_inference(infer_mode_t mode, const int8_t *logits_hw, uint32_t cyc_hw) {
-    int8_t logits_ref[OUTPUT_CLASSES];
-    uint32_t cyc_ref;
-    const char *nome = (mode == INFER_SW) ? "sw" : "cpu";
+// Comando 'S': repete a inferencia da mesma imagem so na CPU e compara com a do
+// acelerador. Mede o ganho sobre a rede inteira (o bench_sw_vs_hw mede um unico
+// tile 8x8x8) e confirma que os dois caminhos dao os mesmos logits.
+static void compare_sw_inference(const int8_t *logits_hw, uint32_t cyc_hw) {
+    int8_t logits_sw[OUTPUT_CLASSES];
+    uint32_t cyc_sw;
 
-    neorv32_uart0_printf("\nExecutando inferencia %s (referencia)...\n",
-                         (mode == INFER_SW) ? "so em software" : "com a CPU movendo os dados");
+    neorv32_uart0_printf("\nExecutando inferencia so em software (referencia)...\n");
     lcd_clear();
-    lcd_goto(0, 0); lcd_puts((mode == INFER_SW) ? "Inferindo (SW)" : "Inferindo (CPU)");
-    int classe_ref = run_inference(mode, logits_ref, &cyc_ref);
+    lcd_goto(0, 0); lcd_puts("Inferindo (SW)");
+    int classe_sw = run_inference(0, logits_sw, &cyc_sw);
 
     int iguais = 1;
     for (int i = 0; i < OUTPUT_CLASSES; i++) {
-        if (logits_ref[i] != logits_hw[i]) iguais = 0;
+        if (logits_sw[i] != logits_hw[i]) iguais = 0;
     }
-    neorv32_uart0_printf("[total-%s] %u ciclos\n", nome, cyc_ref);
-    neorv32_uart0_printf("[%s-vs-hw] classe %s: %d | logits identicos: %s\n",
-                         nome, nome, classe_ref, iguais ? "SIM" : "NAO");
+    neorv32_uart0_printf("[total-sw] %u ciclos\n", cyc_sw);
+    neorv32_uart0_printf("[sw-vs-hw] classe sw: %d | logits identicos: %s\n",
+                         classe_sw, iguais ? "SIM" : "NAO");
     // Divisao so em 32 bits (ver bench_sw_vs_hw: __udivdi3 travava o firmware).
-    // (cyc_ref % cyc_hw) * 100 estouraria 32 bits com totais na casa de 10^8,
+    // (cyc_sw % cyc_hw) * 100 estouraria 32 bits com totais na casa de 10^8,
     // por isso a fracao divide pelo centesimo de cyc_hw.
-    uint32_t sp_int  = cyc_ref / cyc_hw;
-    uint32_t sp_frac = (cyc_hw >= 100u) ? (cyc_ref % cyc_hw) / (cyc_hw / 100u) : 0u;
+    uint32_t sp_int  = cyc_sw / cyc_hw;
+    uint32_t sp_frac = (cyc_hw >= 100u) ? (cyc_sw % cyc_hw) / (cyc_hw / 100u) : 0u;
     if (sp_frac > 99u) sp_frac = 99u;
-    neorv32_uart0_printf("[speedup] inferencia completa HW/%s: %u.%s%u x\n",
-                         (mode == INFER_SW) ? "SW" : "CPU", sp_int, (sp_frac < 10) ? "0" : "", sp_frac);
+    neorv32_uart0_printf("[speedup] inferencia completa HW/SW: %u.%s%u x\n",
+                         sp_int, (sp_frac < 10) ? "0" : "", sp_frac);
 }
-
-#ifdef SIM_PRELOADED
-// ---------------------------------------------------------------------------------
-// Simulacao do SoC (sim/tcc/run_infer_sim.sh, make SIM=1): o modelo da SDRAM ja
-// carregou weights.bin e a imagem no tempo 0, no lugar do upload pela UART.
-// Roda UMA inferencia no modo SIM_INFER_MODE e escreve o fim em LEDG (0xA5 =
-// terminou, 0xEE = erro), que e o que a testbench espera. Sem diagnostico da
-// SDRAM, benchmark nem LCD: cada milissegundo da placa custa ~4 s de simulacao.
-// ---------------------------------------------------------------------------------
-#ifndef SIM_INFER_MODE
-#define SIM_INFER_MODE INFER_ACCEL_DMA
-#endif
-
-static int sim_main(void) {
-    neorv32_uart0_printf("\n=== inferencia na simulacao: tile %ux%u, modo %u ===\n",
-                         ACCEL_TILE, ACCEL_TILE, (unsigned)SIM_INFER_MODE);
-    uint32_t info = accel_check();
-    if (info != 0 || accel_dma_init() != 0) {
-        neorv32_uart0_printf("[erro] INFO = 0x%x ou DMA ausente\n", (unsigned)info);
-        neorv32_gpio_port_set(0xEE);
-        return 1;
-    }
-    int8_t logits[OUTPUT_CLASSES];
-    uint32_t cyc;
-    int classe = run_inference((infer_mode_t)SIM_INFER_MODE, logits, &cyc);
-    neorv32_uart0_printf("[total] %u ciclos\n", cyc);
-    neorv32_uart0_printf(">>> Classe prevista: %d <<<\n", classe);
-    neorv32_gpio_port_set(0xA5);
-    return 0;
-}
-#endif
 
 int main(void) {
     neorv32_uart0_setup(APP_UART_BAUD, 0);
     neorv32_rte_setup(); // instala handlers de debug para excecoes/interrupcoes nao tratadas
     sdram_install_fault_retry_handler(); // retry automatico em access fault na SDRAM
-#ifdef SIM_PRELOADED
-    return sim_main();
-#endif
     neorv32_uart0_printf("\n=== NEORV32 + Acelerador Sistolico - Inferencia MNIST (TCC Fase 3/4) ===\n");
     neorv32_uart0_printf("Modelo: %u camadas, %u bytes de pesos\n", (unsigned)MODEL_NUM_LAYERS, (unsigned)MODEL_WEIGHTS_BYTES);
     neorv32_uart0_printf("SDRAM base: 0x%x\n", (unsigned)SDRAM_BASE);
@@ -116,25 +78,6 @@ int main(void) {
     lcd_goto(1, 0); lcd_puts("testando SDRAM");
 
     sdram_diag_run(); // bateria completa: mapa de erros por bit, estabilidade, faults
-
-    // O firmware e compilado para um tamanho de array (ACCEL_TILE); um bitstream
-    // de outro tamanho daria resultados errados sem aviso.
-    uint32_t info = accel_check();
-    if (info != 0) {
-        neorv32_uart0_printf("[erro] acelerador com INFO = 0x%x, firmware compilado para %ux%u\n",
-                             (unsigned)info, ACCEL_TILE, ACCEL_TILE);
-        lcd_clear();
-        lcd_goto(0, 0); lcd_puts("ERRO: tamanho");
-        lcd_goto(1, 0); lcd_puts("do acelerador");
-        while (1) { }
-    }
-    if (accel_dma_init() != 0) {
-        neorv32_uart0_printf("[erro] DMA ausente no bitstream (IO_DMA_EN)\n");
-        lcd_clear();
-        lcd_goto(0, 0); lcd_puts("ERRO: sem DMA");
-        while (1) { }
-    }
-    neorv32_uart0_printf("Acelerador %ux%u, DMA ligado\n", ACCEL_TILE, ACCEL_TILE);
 
     bench_sw_vs_hw(); // uma vez, antes do laco: nao depende de pesos nem de imagem
 
@@ -154,21 +97,19 @@ int main(void) {
         neorv32_uart0_printf("\nExecutando inferencia...\n");
         int8_t logits[OUTPUT_CLASSES];
         uint32_t cyc_hw;
-        int classe = run_inference(INFER_ACCEL_DMA, logits, &cyc_hw);
+        int classe = run_inference(1, logits, &cyc_hw);
         neorv32_uart0_printf("[total] %u ciclos\n", cyc_hw);
         neorv32_uart0_printf("\n>>> Classe prevista: %d <<<\n", classe);
 
         if (cmd == 'S') {
-            compare_inference(INFER_SW, logits, cyc_hw);
-        } else if (cmd == 'C') {
-            compare_inference(INFER_ACCEL_CPU, logits, cyc_hw);
+            compare_sw_inference(logits, cyc_hw);
         }
 
         lcd_clear();
         lcd_goto(0, 0); lcd_puts("Classe: ");
         lcd_puti(classe);
 
-        // 'H', 'S' e 'C' vem de coleta automatica pelo host: volta direto ao
+        // 'H' e 'S' vem de coleta automatica pelo host: volta direto ao
         // handshake. 'G' (uso interativo) segura o resultado no display ate o
         // clique: sem isso o laco voltava ao handshake e limpava o LCD antes
         // de dar tempo de ler.

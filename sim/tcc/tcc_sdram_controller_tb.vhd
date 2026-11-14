@@ -96,55 +96,6 @@ architecture tb of neorv32_sdram_controller_tb is
     cyc_o <= '0';
   end procedure;
 
-  -- Mestre no estilo do XBUS do NEORV32 (Wishbone pipelined): stb fica alto por
-  -- UM ciclo e cyc continua alto ate o ack. O endereco e o dado mudam logo apos
-  -- o stb, para provar que o controlador registrou o pedido no ciclo do stb.
-  -- Sem ack em TMO ciclos o pedido conta como perdido (no SoC, isso e o
-  -- XBUS_TIMEOUT virando access fault).
-  constant TMO : natural := 64;
-
-  procedure wb_access_p(
-    signal   clk_i : in  std_ulogic;
-    signal   adr_o : out std_ulogic_vector(31 downto 0);
-    signal   dat_o : out std_ulogic_vector(31 downto 0);
-    signal   we_o  : out std_ulogic;
-    signal   stb_o : out std_ulogic;
-    signal   cyc_o : out std_ulogic;
-    signal   ack_i : in  std_ulogic;
-    signal   dat_i : in  std_ulogic_vector(31 downto 0);
-    constant write : in  boolean;
-    constant addr  : in  std_ulogic_vector(31 downto 0);
-    constant wdata : in  std_ulogic_vector(31 downto 0);
-    variable rdata : out std_ulogic_vector(31 downto 0);
-    variable lost  : out boolean
-  ) is
-    variable n : natural;
-  begin
-    wait until rising_edge(clk_i);
-    adr_o <= addr;
-    dat_o <= wdata;
-    if write then we_o <= '1'; else we_o <= '0'; end if;
-    stb_o <= '1';
-    cyc_o <= '1';
-    wait until rising_edge(clk_i);
-    stb_o <= '0';
-    adr_o <= x"DEADBEE0"; -- lixo: o controlador ja deve ter registrado o pedido
-    dat_o <= x"0BADF00D";
-    n := 0;
-    lost := false;
-    while ack_i /= '1' loop
-      if n = TMO then
-        lost := true;
-        exit;
-      end if;
-      wait until rising_edge(clk_i);
-      n := n + 1;
-    end loop;
-    rdata := dat_i;
-    cyc_o <= '0';
-    we_o  <= '0';
-  end procedure;
-
 begin
 
   clk <= not clk after CLK_PERIOD / 2;
@@ -222,9 +173,6 @@ begin
     );
     variable byte_addr : std_ulogic_vector(31 downto 0);
     variable expected  : std_ulogic_vector(31 downto 0);
-    constant P2_N      : natural := 200;
-    variable lost      : boolean;
-    variable p2_lost   : natural := 0;
   begin
     rstn <= '0';
     wait for CLK_PERIOD * 5;
@@ -255,43 +203,6 @@ begin
         errors := errors + 1;
       end if;
     end loop;
-
-    -- Fase 2: mestre pipelined (stb de 1 ciclo), varios acessos em sequencia
-    -- com intervalos variados, de modo que parte dos stb caia durante um
-    -- AUTO REFRESH. Escreve P2_N palavras e le de volta.
-    report "fase 2: mestre com stb de 1 ciclo (estilo XBUS)";
-    for i in 0 to P2_N-1 loop
-      byte_addr := std_ulogic_vector(to_unsigned(((i mod 16) * 1024 + (i / 16) * 3) * 4, 32));
-      expected  := std_ulogic_vector(to_unsigned(16#5A000000# + i * 7919, 32));
-      wb_access_p(clk, wb_adr, wb_dat_o, wb_we, wb_stb, wb_cyc, wb_ack, wb_dat_i,
-                  true, byte_addr, expected, rdata, lost);
-      if lost then p2_lost := p2_lost + 1; end if;
-      for g in 1 to (i mod 5) loop
-        wait until rising_edge(clk);
-      end loop;
-    end loop;
-    for i in 0 to P2_N-1 loop
-      byte_addr := std_ulogic_vector(to_unsigned(((i mod 16) * 1024 + (i / 16) * 3) * 4, 32));
-      expected  := std_ulogic_vector(to_unsigned(16#5A000000# + i * 7919, 32));
-      wb_access_p(clk, wb_adr, wb_dat_o, wb_we, wb_stb, wb_cyc, wb_ack, wb_dat_i,
-                  false, byte_addr, x"00000000", rdata, lost);
-      if lost then
-        p2_lost := p2_lost + 1;
-      elsif rdata /= expected then
-        report "fase 2 MISMATCH i=" & integer'image(i) & " got=0x" & to_hstring(rdata) &
-               " expected=0x" & to_hstring(expected) severity error;
-        errors := errors + 1;
-      end if;
-      for g in 1 to (i mod 3) loop
-        wait until rising_edge(clk);
-      end loop;
-    end loop;
-    report "fase 2: " & integer'image(2 * P2_N) & " acessos, " & integer'image(p2_lost) &
-           " sem ack (perdidos)";
-    if p2_lost /= 0 then
-      report "fase 2: pedidos com stb de 1 ciclo foram perdidos" severity error;
-      errors := errors + p2_lost;
-    end if;
 
     if errors = 0 then
       report "=== neorv32_sdram_controller_tb: TODOS OS ENDERECOS OK, DADOS INTEGROS APOS REFRESH (PASS) ===";

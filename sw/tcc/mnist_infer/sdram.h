@@ -22,7 +22,6 @@
 #define SDRAM_OFF_BUF_B        0x00150000u  // buffer de ativacoes (ping-pong B), 256 KB
 #define SDRAM_OFF_IM2COL       0x00200000u  // matriz im2col temporaria (camadas conv), 512 KB
 #define SDRAM_OFF_ACC           0x00300000u  // acumulador INT32 do matmul (M x N), 512 KB
-#define SDRAM_OFF_WPACK        0x00400000u  // pesos em tiles contiguos para o DMA (accel_wpack), 1 MB
 
 #define SDRAM_ADDR(off) ((volatile void*)(SDRAM_BASE + (off)))
 
@@ -39,8 +38,7 @@ uint32_t sdram_uart_recv_blob(uint32_t sdram_offset);
 //   'G' -> go: encerra o handshake e retorna (inferencia + espera de KEY1)
 //   'H' -> como 'G', mas sem esperar KEY1 (coleta em lote pelo host)
 //   'S' -> como 'H', e repete a inferencia so em software para comparar
-//   'C' -> como 'H', e repete com a CPU movendo os dados (sem DMA) para comparar
-// Retorna o comando que encerrou o handshake ('G', 'H', 'S' ou 'C').
+// Retorna o comando que encerrou o handshake ('G', 'H' ou 'S').
 // Usado por main.c para o fluxo interativo de carga (Fase 3, "Validar carga de
 // tile via UART").
 char sdram_uart_handshake_loop(void);
@@ -49,11 +47,6 @@ char sdram_uart_handshake_loop(void);
 // SDRAM (ver sdram.c) em vez de deixar o RTE pular a instrucao que falhou.
 // Chamar uma vez, depois de neorv32_rte_setup().
 void sdram_install_fault_retry_handler(void);
-
-// Conta quantas vezes um blob de pesos ('W') foi recebido desde o boot. Quem
-// guarda uma copia derivada dos pesos (os tiles do DMA, inference.c) compara com
-// o valor da ultima montagem para saber se precisa refazer.
-uint32_t sdram_weights_generation(void);
 
 // Numero total de access faults retentados desde o boot (para diagnostico).
 uint32_t sdram_get_fault_count(void);

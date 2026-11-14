@@ -24,7 +24,6 @@ static volatile uint32_t sdram_fault_last_addr = 0;
 static volatile uint32_t sdram_fault_retry_count = 0;
 static volatile uint32_t sdram_fault_total = 0;
 static volatile uint32_t sdram_fault_giveups = 0;
-static uint32_t sdram_weights_gen = 0;
 
 static void sdram_access_fault_retry_handler(void) {
     uint32_t mepc = neorv32_cpu_csr_read(CSR_MEPC);
@@ -71,10 +70,6 @@ uint32_t sdram_get_fault_count(void) {
 
 uint32_t sdram_get_fault_giveups(void) {
     return sdram_fault_giveups;
-}
-
-uint32_t sdram_weights_generation(void) {
-    return sdram_weights_gen;
 }
 
 // Le um byte com timeout limitado (-1 se nada chegar a tempo). Alguns
@@ -182,7 +177,6 @@ char sdram_uart_handshake_loop(void) {
             lcd_goto(0, 0); lcd_puts("Recebendo pesos");
             lcd_goto(1, 0); lcd_puts("422 KB via UART");
             uint32_t n = sdram_uart_recv_blob(SDRAM_OFF_WEIGHTS);
-            sdram_weights_gen++;
             lcd_clear();
             lcd_goto(0, 0); lcd_puts("Pesos na SDRAM");
             lcd_goto(1, 0); lcd_puti((int32_t)n); lcd_puts(" bytes");
@@ -195,7 +189,7 @@ char sdram_uart_handshake_loop(void) {
             lcd_goto(0, 0); lcd_puts("Imagem recebida");
             lcd_goto(1, 0); lcd_puti((int32_t)n); lcd_puts(" bytes");
             neorv32_uart0_printf("\n[sdram] imagem recebida: %u bytes\n", n);
-        } else if (cmd == 'G' || cmd == 'H' || cmd == 'S' || cmd == 'C') {
+        } else if (cmd == 'G' || cmd == 'H' || cmd == 'S') {
             return cmd;
         }
     }

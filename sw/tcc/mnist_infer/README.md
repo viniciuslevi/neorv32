@@ -22,11 +22,11 @@ Fase 4 ("Inferência end-to-end") da [Metodologia](../../../docs/tcc/) do TCC.
 
 | Arquivo | Função |
 |---|---|
-| `accel_driver.c/h` | Multiplicação de matrizes INT8 (M×K por K×N) em tiles T×T (`ACCEL_TILE`, 8 ou 16: `make TILE=16`), com padding de borda e correção de zero-point. Dois caminhos: `accel_matmul_i8()`, em que a CPU junta os bytes e escreve no acelerador (o original), e `accel_matmul_dma()`/`accel_matvec_dma()`, em que o DMA do NEORV32 copia tiles já contíguos (`accel_wpack`/`accel_apack`) e a CPU dorme em `wfi` (Proposta A). `accel_check()` confere o tamanho do array no registrador INFO. |
+| `accel_driver.c/h` | `accel_matmul_i8()`: multiplicação de matrizes INT8 genérica (M×K por K×N) via tiles 8×8, com padding automático de borda e correção de zero-point (quantização assimétrica). |
 | `sdram.c/h` | Mapa de regiões da SDRAM + protocolo de carga via UART (`sdram_uart_handshake_loop`). O `'R'` (ready) é reenviado periodicamente (poll de 1ms) em vez de mandado uma única vez, e `sdram_uart_recv_blob` recebe em pedaços de 64B confirmados individualmente (`'K'`/`'N'` + retry pelo host) em vez de uma leitura cega do blob inteiro. Também instala (`sdram_install_fault_retry_handler`) um handler de exceção que reexecuta automaticamente qualquer Load/Store access fault na SDRAM em vez de deixar o RTE pular a instrução (ver "Bring-up em hardware real"). |
-| `inference.c/h` | Pipeline completo: `conv2d` (im2col + acelerador) → `maxpool2x2` → `conv2d` → `maxpool2x2` → `dense` → `dense` → argmax, em três modos (`infer_mode_t`): só CPU, acelerador com a CPU movendo os dados, acelerador com DMA (padrão). No modo DMA o im2col é gravado direto em tiles e os pesos são empacotados uma vez por carga (`SDRAM_OFF_WPACK`). Tempos medidos pelo `mtime`, que conta também o tempo da CPU dormindo. Benchmark SW-vs-HW de um tile T×T×T. |
+| `inference.c/h` | Pipeline completo: `conv2d` (im2col + acelerador) → `maxpool2x2` → `conv2d` → `maxpool2x2` → `dense` → `dense` → argmax. Benchmark SW-vs-HW de um tile 8×8×8. |
 | `model_meta.h` | Gerado por `ia_models/src/export_weights.py` a partir do `.tflite` real (não editar à mão). |
-| `main.c` | Orquestra handshake UART, inferência, benchmark. Instala `neorv32_rte_setup()` (handlers de debug de exceção) e `sdram_install_fault_retry_handler()` logo no início, e recusa um bitstream sem DMA ou com array de outro tamanho. Comandos do host: `'G'` (espera KEY1), `'H'` (coleta em lote), `'S'` (compara com a CPU sozinha), `'C'` (compara com o caminho sem DMA). |
+| `main.c` | Orquestra handshake UART, inferência, benchmark. Instala `neorv32_rte_setup()` (handlers de debug de exceção) e `sdram_install_fault_retry_handler()` logo no início. |
 | `tools/send_weights.py` | Ferramenta host: envia `weights.bin` + uma imagem MNIST de teste pela UART, em pedaços de 64B confirmados (mesmo protocolo do `sdram.c`), com retry automático por pedaço. |
 
 ### Python (`ia_models/src/export_weights.py`, Fase 2→3)
@@ -385,9 +385,8 @@ benchmark (ambos pelas correções das seções acima) e o `%02u` na linha de sp
 Relato completo em `docs/tcc/Diario de Bring-up.md`.
 
 - **Access faults transitórios na SDRAM**: ~14 700 por inferência, todos
-  recuperados pelo retry de `sdram.c`. Causa encontrada em simulação (Diário, 12.1:
-  o `stb` de um ciclo do XBUS se perdia durante o refresh) e corrigida no
-  controlador; falta confirmar na placa.
+  recuperados pelo retry de `sdram.c`. A causa no controlador não foi isolada, e
+  os ciclos gastos em retry entram nos tempos por camada.
 - **Divisão de 64 bits trava o firmware**: `__udivdi3` na linha de speedup parava a
   execução no meio da impressão. A conta foi reescrita em 32 bits; o mecanismo do
   travamento não foi identificado.
@@ -408,7 +407,5 @@ Relato completo em `docs/tcc/Diario de Bring-up.md`.
 - Requantização usa `float` (soft-float via libgcc) em vez de multiplicação de
   ponto fixo inteiro (como o TFLite faz internamente) — mais simples de auditar,
   porém mais lenta. Otimização possível para trabalho futuro.
-- O DMA do NEORV32 divide o barramento com a CPU, que tem prioridade fixa: cada
-  byte cruza o barramento duas vezes (SDRAM → DMA → acelerador), e as leituras de
-  RESULT pela CPU disputam o mesmo caminho (Proposta A; a C daria ao acelerador um
-  caminho próprio até a SDRAM).
+- Sem DMA: a CPU intermedeia toda cópia SDRAM↔acelerador (aceito no escopo do
+  TCC, ver Metodologia 3.11).

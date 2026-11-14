@@ -5,19 +5,6 @@
 
 MARCH = rv32imc_zicsr_zifencei
 
-# Tamanho do array sistolico do bitstream (ACCEL_ARRAY_SIZE no top-level): 8 ou 16.
-# O firmware confere contra o registrador INFO no boot.  make TILE=16 exe
-TILE ?= 8
-USER_FLAGS += -DACCEL_TILE=$(TILE)
-
-# Simulacao do SoC (sim/tcc/run_infer_sim.sh): UART direto no console do simulador,
-# pesos e imagem ja na SDRAM, uma inferencia no modo SIM_MODE (2 = DMA, 1 = CPU
-# movendo os dados, 0 = so CPU). Ver sim_main() em main.c.
-ifeq ($(SIM),1)
-SIM_MODE ?= 2
-USER_FLAGS += -DUART0_SIM_MODE -DSIM_PRELOADED -DSIM_INFER_MODE=$(SIM_MODE)
-endif
-
 USER_FLAGS += -Wl,--defsym,__neorv32_rom_size=32k
 USER_FLAGS += -Wl,--defsym=__neorv32_ram_size=16k
 
